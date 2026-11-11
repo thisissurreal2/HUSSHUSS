@@ -9,6 +9,7 @@ import {
   type BackupBundle,
 } from './backupStorage'
 import { getPendingLocalChanges } from './localSyncQueue'
+import { withConnectionTimeout } from './connectionRequest'
 
 function downloadJson(text: string, suffix: string): void {
   const blob = new Blob([text], { type: 'application/json' })
@@ -139,12 +140,15 @@ export function BackupRecovery({ onRestored }: { onRestored: () => void }) {
     setConnectionBusy(true)
     setConnectionMessage(null)
     try {
-      const response = await fetch('/api/github/connect-existing', {
-        cache: 'no-store',
-        credentials: 'same-origin',
+      const value: unknown = await withConnectionTimeout(async (signal) => {
+        const response = await fetch('/api/github/connect-existing', {
+          cache: 'no-store',
+          credentials: 'same-origin',
+          signal,
+        })
+        if (!response.ok) throw new Error('Connection setup is unavailable.')
+        return await response.json()
       })
-      if (!response.ok) throw new Error('Connection setup is unavailable.')
-      const value: unknown = await response.json()
       if (typeof value !== 'object' || value === null || Array.isArray(value)
         || !('configured' in value) || value.configured !== true
         || !('state' in value) || typeof value.state !== 'string') {
@@ -168,14 +172,17 @@ export function BackupRecovery({ onRestored }: { onRestored: () => void }) {
     setConnectionBusy(true)
     setConnectionMessage(null)
     try {
-      const response = await fetch('/api/github/connect-existing', {
-        method: 'POST',
-        cache: 'no-store',
-        credentials: 'same-origin',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ state: existingInstallState, installationId }),
+      const { response, value } = await withConnectionTimeout(async (signal) => {
+        const response = await fetch('/api/github/connect-existing', {
+          method: 'POST',
+          cache: 'no-store',
+          credentials: 'same-origin',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ state: existingInstallState, installationId }),
+          signal,
+        })
+        return { response, value: await response.json() as unknown }
       })
-      const value: unknown = await response.json()
       if (!response.ok) {
         setConnectionMessage(response.status === 502
           ? 'GitHub could not be reached to verify this installation. Try again shortly.'

@@ -16,6 +16,7 @@ let createInstallState
 let onFirstInstallCallback
 let onExistingConnectionGet
 let onExistingConnectionPost
+let withConnectionTimeout
 let fetchCalls
 
 before(async () => {
@@ -33,10 +34,12 @@ before(async () => {
   const helper = await vite.ssrLoadModule('/functions/_shared/github.ts')
   const callback = await vite.ssrLoadModule('/functions/api/github/callback.ts')
   const existing = await vite.ssrLoadModule('/functions/api/github/connect-existing.ts')
+  const connectionRequest = await vite.ssrLoadModule('/src/connectionRequest.ts')
   createInstallState = helper.createInstallState
   onFirstInstallCallback = callback.onRequestGet
   onExistingConnectionGet = existing.onRequestGet
   onExistingConnectionPost = existing.onRequestPost
+  withConnectionTimeout = connectionRequest.withConnectionTimeout
 })
 
 after(async () => {
@@ -64,6 +67,7 @@ function mockGitHub({
   failBody,
   networkFailAt,
   invalidJsonAt,
+  beforeRepositoryResponse,
 } = {}) {
   fetchCalls = []
   globalThis.fetch = async (input, init = {}) => {
@@ -110,10 +114,12 @@ function mockGitHub({
     }
     if (url.pathname === '/installation/repositories') {
       assert.equal(init.headers.Authorization, `Bearer ${installToken}`)
-      return Response.json(repositories ?? {
+      const response = Response.json(repositories ?? {
         total_count: 1,
         repositories: [{ full_name: repositoryName, private: true }],
       })
+      beforeRepositoryResponse?.()
+      return response
     }
     throw new Error(`Unexpected mocked GitHub request: ${url}`)
   }
@@ -131,20 +137,40 @@ async function beginExistingConnection() {
   return { state: body.state, cookie: stateCookie.split(';')[0] }
 }
 
-async function submitExistingConnection({ state, cookie, id = installationId }) {
-  return onExistingConnectionPost({
-    request: new Request(`${appOrigin}/api/github/connect-existing`, {
-      method: 'POST',
-      headers: {
-        Origin: appOrigin,
-        'Content-Type': 'application/json',
-        'Sec-Fetch-Site': 'same-origin',
-        Cookie: cookie,
-      },
-      body: JSON.stringify({ state, installationId: id }),
-    }),
-    env,
+async function submitExistingConnection({
+  state,
+  cookie,
+  id = installationId,
+  modifyRequest,
+  requestEnv = env,
+}) {
+  const request = new Request(`${appOrigin}/api/github/connect-existing`, {
+    method: 'POST',
+    headers: {
+      Origin: appOrigin,
+      'Content-Type': 'application/json',
+      'Sec-Fetch-Site': 'same-origin',
+      Cookie: cookie,
+    },
+    body: JSON.stringify({ state, installationId: id }),
   })
+  modifyRequest?.(request)
+  return onExistingConnectionPost({
+    request,
+    env: requestEnv,
+  })
+}
+
+async function captureUnexpectedFailure(challenge, options = {}) {
+  const logged = []
+  const originalError = console.error
+  console.error = (...values) => logged.push(values.join(' '))
+  try {
+    const response = await submitExistingConnection({ ...challenge, ...options })
+    return { response, logged }
+  } finally {
+    console.error = originalError
+  }
 }
 
 test('GitHub connection supports first-time and already-installed flows securely', async (context) => {
@@ -199,7 +225,8 @@ test('GitHub connection supports first-time and already-installed flows securely
         path: `/app/installations/${installationId}`,
         stage: 'installation_lookup',
         status: 401,
-        body: { message: 'Bad credentials', errors: [{ code: 'invalid' }] },
+        body: { message: `Bad credentials for installation ${installationId}`, errors: [{ code: 'invalid' }] },
+        expectedMessage: 'Bad credentials for installation [REDACTED_SECRET]',
       },
       {
         name: 'installation token creation',
@@ -239,8 +266,9 @@ test('GitHub connection supports first-time and already-installed flows securely
         assert.equal(diagnostic.event, 'github_installation_verification_failed')
         assert.equal(diagnostic.stage, item.stage)
         assert.equal(diagnostic.status, item.status)
-        assert.equal(diagnostic.message, item.body.message)
+        assert.equal(diagnostic.message, item.expectedMessage ?? item.body.message)
         assert.equal(diagnostic.requestId, 'MOCK-REQUEST-ID')
+        assert.equal(logged[0].includes(installationId), false)
         if (item.body.errors) assert.equal(diagnostic.code, item.body.errors[0].code)
         assert.equal(logged[0].includes(env.GITHUB_APP_PRIVATE_KEY), false)
         assert.equal(logged[0].includes(installToken), false)
@@ -336,6 +364,178 @@ test('GitHub connection supports first-time and already-installed flows securely
     assert.equal(logged.length, 1)
     assert.equal(logged[0].includes(fetchCalls[0].init.headers.Authorization), false)
     assert.match(JSON.parse(logged[0]).message, /\[REDACTED_SECRET\]/)
+  })
+
+  await context.test('returns a safe 500 and logs unexpected exceptions at each major stage', async (subtests) => {
+    const cases = [
+      {
+        name: 'configuration',
+        stage: 'configuration',
+        options: {
+          requestEnv: new Proxy(env, {
+            get(target, property, receiver) {
+              if (property === 'APP_ORIGIN') throw new TypeError('sensitive environment binding')
+              return Reflect.get(target, property, receiver)
+            },
+          }),
+        },
+      },
+      {
+        name: 'origin validation',
+        stage: 'origin_validation',
+        options: {
+          modifyRequest: (request) => {
+            const originalGet = request.headers.get.bind(request.headers)
+            request.headers.get = (name) => {
+              if (name === 'Origin') throw new TypeError('sensitive header')
+              return originalGet(name)
+            }
+          },
+        },
+      },
+      {
+        name: 'request size validation',
+        stage: 'request_size_validation',
+        options: {
+          modifyRequest: (request) => {
+            const originalGet = request.headers.get.bind(request.headers)
+            request.headers.get = (name) => {
+              if (name === 'Content-Length') throw new TypeError('sensitive header')
+              return originalGet(name)
+            }
+          },
+        },
+      },
+      {
+        name: 'request body read',
+        stage: 'request_body_read',
+        options: {
+          modifyRequest: (request) => {
+            request.text = async () => { throw new TypeError('sensitive body read failure') }
+          },
+        },
+      },
+      {
+        name: 'request body parse',
+        stage: 'request_body_parse',
+        before: () => {
+          const originalParse = JSON.parse
+          JSON.parse = (value, ...args) => {
+            if (typeof value === 'string' && value.includes('"installationId"')) {
+              throw new TypeError('sensitive parse failure')
+            }
+            return originalParse(value, ...args)
+          }
+          return () => { JSON.parse = originalParse }
+        },
+      },
+      {
+        name: 'state validation',
+        stage: 'state_validation',
+        options: {
+          modifyRequest: (request) => {
+            const originalGet = request.headers.get.bind(request.headers)
+            request.headers.get = (name) => {
+              if (name === 'Cookie') throw new TypeError('sensitive cookie')
+              return originalGet(name)
+            }
+          },
+        },
+      },
+      {
+        name: 'installation verification',
+        stage: 'installation_verification',
+        before: () => {
+          const originalImportKey = crypto.subtle.importKey.bind(crypto.subtle)
+          crypto.subtle.importKey = async (format, keyData, algorithm, ...rest) => {
+            if (typeof algorithm === 'object' && algorithm.name === 'RSASSA-PKCS1-v1_5') {
+              throw new TypeError('sensitive signing key failure')
+            }
+            return originalImportKey(format, keyData, algorithm, ...rest)
+          }
+          return () => { crypto.subtle.importKey = originalImportKey }
+        },
+      },
+      {
+        name: 'session cookie signing',
+        stage: 'session_cookie_signing',
+        before: () => {
+          const originalSign = crypto.subtle.sign.bind(crypto.subtle)
+          crypto.subtle.sign = async (algorithm, ...args) => {
+            if (algorithm === 'HMAC' || (typeof algorithm === 'object' && algorithm.name === 'HMAC')) {
+              throw new TypeError('sensitive signing secret failure')
+            }
+            return originalSign(algorithm, ...args)
+          }
+          return () => { crypto.subtle.sign = originalSign }
+        },
+      },
+      {
+        name: 'response construction',
+        stage: 'response_construction',
+        configureMock: () => {
+          const originalHeaders = globalThis.Headers
+          mockGitHub({
+            beforeRepositoryResponse: () => {
+              globalThis.Headers = class extends originalHeaders {
+                constructor(...args) {
+                  super(...args)
+                  throw new TypeError('sensitive response construction failure')
+                }
+              }
+            },
+          })
+          return () => { globalThis.Headers = originalHeaders }
+        },
+      },
+    ]
+
+    for (const item of cases) {
+      await subtests.test(item.name, async () => {
+        const restoreMock = item.configureMock?.()
+        if (!item.configureMock) mockGitHub()
+        const challenge = await beginExistingConnection()
+        const restore = item.before?.()
+        try {
+          const { response, logged } = await captureUnexpectedFailure(challenge, item.options)
+          assert.equal(response.status, item.status ?? 500)
+          assert.deepEqual(await response.json(), { error: 'connection_unavailable' })
+          assert.equal(logged.length, 1)
+          const diagnostic = JSON.parse(logged[0])
+          assert.equal(diagnostic.event, 'github_connect_existing_post_unexpected_failure')
+          assert.equal(diagnostic.stage, item.stage)
+          assert.ok(diagnostic.errorType)
+          assert.equal(logged[0].includes(installationId), false)
+          assert.equal(logged[0].includes(challenge.cookie), false)
+          assert.equal(logged[0].includes(challenge.state), false)
+          assert.equal(logged[0].includes(env.GITHUB_APP_PRIVATE_KEY), false)
+          assert.equal(logged[0].includes(env.SESSION_SIGNING_KEY), false)
+          assert.equal(logged[0].includes(installToken), false)
+        } finally {
+          restore?.()
+          restoreMock?.()
+        }
+      })
+    }
+  })
+
+  await context.test('preserves the service-unavailable response for missing configuration', async () => {
+    const challenge = await beginExistingConnection()
+    const response = await submitExistingConnection({ ...challenge, requestEnv: {} })
+    assert.equal(response.status, 503)
+    assert.deepEqual(await response.json(), { error: 'connection_unavailable' })
+  })
+
+  await context.test('browser connection request timeout aborts and settles the pending operation', async () => {
+    let receivedSignal
+    await assert.rejects(
+      withConnectionTimeout((signal) => {
+        receivedSignal = signal
+        return new Promise(() => {})
+      }, 10),
+      /timed out/,
+    )
+    assert.equal(receivedSignal.aborted, true)
   })
 
   await context.test('rejects installations outside the required app/account/scope/permission/repository', async (subtests) => {

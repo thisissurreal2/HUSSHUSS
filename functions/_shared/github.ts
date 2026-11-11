@@ -68,6 +68,20 @@ export class GitHubApiError extends Error {
   }
 }
 
+export class GitHubInstallationRejectedError extends Error {
+  constructor() {
+    super('GitHub installation did not meet the configured verification requirements.')
+    this.name = 'GitHubInstallationRejectedError'
+  }
+}
+
+export class GitHubConfigurationError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'GitHubConfigurationError'
+  }
+}
+
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
@@ -140,7 +154,7 @@ function requireConfiguration(env: GitHubConnectionEnv): {
   const { APP_ORIGIN, ALLOWED_REPOSITORY, GITHUB_APP_ID, GITHUB_APP_PRIVATE_KEY, GITHUB_APP_SLUG, SESSION_SIGNING_KEY } = env
   if (!APP_ORIGIN || !ALLOWED_REPOSITORY || !GITHUB_APP_ID || !GITHUB_APP_PRIVATE_KEY
     || !GITHUB_APP_SLUG || !SESSION_SIGNING_KEY) {
-    throw new Error('Connection service is not configured.')
+    throw new GitHubConfigurationError('Connection service is not configured.')
   }
 
   const origin = new URL(APP_ORIGIN)
@@ -151,7 +165,7 @@ function requireConfiguration(env: GitHubConnectionEnv): {
     || !/^[a-z0-9-]+$/.test(GITHUB_APP_SLUG)
     || repository !== 'thisissurreal2/husshuss-data'
     || !/^[0-9a-fA-F]{64}$/.test(SESSION_SIGNING_KEY)) {
-    throw new Error('Connection service configuration is invalid.')
+    throw new GitHubConfigurationError('Connection service configuration is invalid.')
   }
 
   return {
@@ -249,6 +263,7 @@ async function githubErrorDiagnostic(
   response: Response,
   stage: GitHubApiStage,
   requestToken: string,
+  sensitiveValues: string[],
 ): Promise<GitHubApiDiagnostic> {
   let payload: unknown
   try {
@@ -260,16 +275,16 @@ async function githubErrorDiagnostic(
   let code: string | undefined
   let message: string | undefined
   if (isObject(payload)) {
-    message = safeDiagnosticText(payload.message, 300, [requestToken])
+    message = safeDiagnosticText(payload.message, 300, [requestToken, ...sensitiveValues])
     if (Array.isArray(payload.errors)) {
       for (const item of payload.errors) {
         if (!isObject(item)) continue
-        code = safeDiagnosticText(item.code, 64)
-        if (!message) message = safeDiagnosticText(item.message, 300, [requestToken])
+        code = safeDiagnosticText(item.code, 64, sensitiveValues)
+        if (!message) message = safeDiagnosticText(item.message, 300, [requestToken, ...sensitiveValues])
         if (code) break
       }
     }
-    if (!code) code = safeDiagnosticText(payload.code, 64)
+    if (!code) code = safeDiagnosticText(payload.code, 64, sensitiveValues)
   }
 
   return {
@@ -277,8 +292,8 @@ async function githubErrorDiagnostic(
     status: response.status,
     ...(code ? { code } : {}),
     ...(message ? { message } : {}),
-    ...(safeDiagnosticText(response.headers.get('x-github-request-id'), 100)
-      ? { requestId: safeDiagnosticText(response.headers.get('x-github-request-id'), 100) }
+    ...(safeDiagnosticText(response.headers.get('x-github-request-id'), 100, sensitiveValues)
+      ? { requestId: safeDiagnosticText(response.headers.get('x-github-request-id'), 100, sensitiveValues) }
       : {}),
   }
 }
@@ -289,10 +304,12 @@ async function githubJson<T>(
   stage: GitHubApiStage,
   method = 'GET',
   body?: unknown,
+  sensitiveValues: string[] = [],
 ): Promise<T> {
-  let response: Response
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), 12_000)
   try {
-    response = await fetch(url, {
+    const response = await fetch(url, {
       method,
       headers: {
         Accept: 'application/vnd.github+json',
@@ -300,29 +317,35 @@ async function githubJson<T>(
         'X-GitHub-Api-Version': API_VERSION,
         ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
       },
+      signal: controller.signal,
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     })
-  } catch {
+    if (!response.ok) {
+      throw new GitHubApiError(await githubErrorDiagnostic(response, stage, token, sensitiveValues))
+    }
+    try {
+      return await response.json() as T
+    } catch {
+      throw new GitHubApiError({
+        stage,
+        status: response.status,
+        code: 'INVALID_JSON_RESPONSE',
+        message: 'GitHub returned a successful status with an invalid JSON response.',
+        ...(safeDiagnosticText(response.headers.get('x-github-request-id'), 100, sensitiveValues)
+          ? { requestId: safeDiagnosticText(response.headers.get('x-github-request-id'), 100, sensitiveValues) }
+          : {}),
+      })
+    }
+  } catch (error) {
+    if (error instanceof GitHubApiError) throw error
     throw new GitHubApiError({
       stage,
       status: null,
       code: 'NETWORK_ERROR',
       message: 'No HTTP response was received from GitHub.',
     })
-  }
-  if (!response.ok) throw new GitHubApiError(await githubErrorDiagnostic(response, stage, token))
-  try {
-    return await response.json() as T
-  } catch {
-    throw new GitHubApiError({
-      stage,
-      status: response.status,
-      code: 'INVALID_JSON_RESPONSE',
-      message: 'GitHub returned a successful status with an invalid JSON response.',
-      ...(safeDiagnosticText(response.headers.get('x-github-request-id'), 100)
-        ? { requestId: safeDiagnosticText(response.headers.get('x-github-request-id'), 100) }
-        : {}),
-    })
+  } finally {
+    clearTimeout(timeout)
   }
 }
 
@@ -338,6 +361,9 @@ export async function verifyInstallation(
     `https://api.github.com/app/installations/${installationId}`,
     appJwt,
     'installation_lookup',
+    'GET',
+    undefined,
+    [installationId],
   )
   if (!isObject(installation) || installation.id !== Number(installationId)
     || installation.app_id !== Number(config.appId)
@@ -348,7 +374,7 @@ export async function verifyInstallation(
     || !isObject(installation.permissions)
     || Object.keys(installation.permissions).length !== 1
     || installation.permissions.metadata !== 'read') {
-    throw new Error('Installation is outside the configured account or repository.')
+    throw new GitHubInstallationRejectedError()
   }
 
   const accessToken = await githubJson<GitHubInstallationToken>(
@@ -357,24 +383,28 @@ export async function verifyInstallation(
     'installation_token_creation',
     'POST',
     { permissions: { metadata: 'read' } },
+    [installationId],
   )
   if (!isObject(accessToken) || typeof accessToken.token !== 'string' || accessToken.token.length < 20) {
-    throw new Error('GitHub did not issue a verification token.')
+    throw new GitHubInstallationRejectedError()
   }
 
   const repositoryList = await githubJson<GitHubRepositoriesResponse>(
     'https://api.github.com/installation/repositories?per_page=100',
     accessToken.token,
     'repository_listing',
+    'GET',
+    undefined,
+    [installationId],
   )
   if (!isObject(repositoryList) || repositoryList.total_count !== 1
     || !Array.isArray(repositoryList.repositories) || repositoryList.repositories.length !== 1) {
-    throw new Error('The app must be installed on only the configured private repository.')
+    throw new GitHubInstallationRejectedError()
   }
   const repository = repositoryList.repositories[0]
   if (!repository || typeof repository.full_name !== 'string' || repository.private !== true
     || repository.full_name.toLowerCase() !== config.repository) {
-    throw new Error('The configured private repository was not verified.')
+    throw new GitHubInstallationRejectedError()
   }
 
   return {
