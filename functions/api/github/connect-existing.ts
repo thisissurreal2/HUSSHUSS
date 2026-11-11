@@ -73,9 +73,14 @@ export async function onRequestPost({ request, env }: PagesContext): Promise<Res
   try {
     installation = await verifyInstallation(env, payload.installationId)
   } catch (error) {
-    return error instanceof GitHubApiError
-      ? jsonResponse({ error: 'verification_unavailable' }, 502)
-      : jsonResponse({ error: 'installation_not_verified' }, 403)
+    if (error instanceof GitHubApiError) {
+      console.error(JSON.stringify({
+        event: 'github_installation_verification_failed',
+        ...error.diagnostic,
+      }))
+      return jsonResponse({ error: 'verification_unavailable' }, 502)
+    }
+    return jsonResponse({ error: 'installation_not_verified' }, 403)
   }
 
   try {

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { generateKeyPairSync } from 'node:crypto'
+import { generateKeyPairSync, verify as verifySignature } from 'node:crypto'
 import { after, before, test } from 'node:test'
 import { createServer } from 'vite'
 
@@ -11,6 +11,7 @@ const installationId = '180968038'
 const installToken = 'test-installation-token-with-enough-length'
 let vite
 let env
+let appPublicKey
 let createInstallState
 let onFirstInstallCallback
 let onExistingConnectionGet
@@ -18,7 +19,8 @@ let onExistingConnectionPost
 let fetchCalls
 
 before(async () => {
-  const { privateKey } = generateKeyPairSync('rsa', { modulusLength: 2048 })
+  const { privateKey, publicKey } = generateKeyPairSync('rsa', { modulusLength: 2048 })
+  appPublicKey = publicKey
   env = {
     APP_ORIGIN: appOrigin,
     ALLOWED_REPOSITORY: repositoryName,
@@ -54,12 +56,51 @@ function installationResponse(overrides = {}) {
   }
 }
 
-function mockGitHub({ installation = installationResponse(), repositories, failWith } = {}) {
+function mockGitHub({
+  installation = installationResponse(),
+  repositories,
+  failAt,
+  failWith,
+  failBody,
+  networkFailAt,
+  invalidJsonAt,
+} = {}) {
   fetchCalls = []
   globalThis.fetch = async (input, init = {}) => {
     const url = new URL(String(input))
     fetchCalls.push({ url, init })
-    if (failWith) return Response.json({ message: 'mock verification failure' }, { status: failWith })
+    assert.equal(init.headers['X-GitHub-Api-Version'], '2026-03-10')
+    if (url.pathname.startsWith('/app/')) {
+      const authorization = init.headers.Authorization
+      assert.match(authorization, /^Bearer /)
+      const jwt = authorization.slice('Bearer '.length)
+      const [encodedHeader, encodedPayload, encodedSignature] = jwt.split('.')
+      const header = JSON.parse(Buffer.from(encodedHeader, 'base64url').toString())
+      const claims = JSON.parse(Buffer.from(encodedPayload, 'base64url').toString())
+      const now = Math.floor(Date.now() / 1000)
+      assert.equal(header.alg, 'RS256')
+      assert.equal(claims.iss, appId)
+      assert.ok(claims.iat <= now - 59 && claims.iat >= now - 65)
+      assert.equal(claims.exp - claims.iat, 9 * 60)
+      assert.ok(claims.exp <= now + 8 * 60)
+      assert.equal(verifySignature(
+        'RSA-SHA256',
+        Buffer.from(`${encodedHeader}.${encodedPayload}`),
+        appPublicKey,
+        Buffer.from(encodedSignature, 'base64url'),
+      ), true)
+    }
+    if (networkFailAt === url.pathname) throw new TypeError('mock network failure')
+    if (failWith && (!failAt || failAt === url.pathname)) {
+      const body = typeof failBody === 'function'
+        ? failBody(init)
+        : failBody ?? { message: 'mock verification failure' }
+      return Response.json(body, {
+        status: failWith,
+        headers: { 'x-github-request-id': 'MOCK-REQUEST-ID' },
+      })
+    }
+    if (invalidJsonAt === url.pathname) return new Response('not-json', { status: 200 })
     if (url.pathname === `/app/installations/${installationId}` && init.method !== 'POST') {
       return Response.json(installation)
     }
@@ -151,14 +192,150 @@ test('GitHub connection supports first-time and already-installed flows securely
     assert.equal(fetchCalls.length, 0)
   })
 
-  await context.test('rejects missing installations from GitHub without issuing a session', async () => {
-    mockGitHub({ failWith: 404 })
+  await context.test('logs safe diagnostics for GitHub API failures at each verification stage', async (subtests) => {
+    const cases = [
+      {
+        name: 'installation lookup',
+        path: `/app/installations/${installationId}`,
+        stage: 'installation_lookup',
+        status: 401,
+        body: { message: 'Bad credentials', errors: [{ code: 'invalid' }] },
+      },
+      {
+        name: 'installation token creation',
+        path: `/app/installations/${installationId}/access_tokens`,
+        stage: 'installation_token_creation',
+        status: 422,
+        body: { message: 'Validation failed', errors: [{ code: 'unprocessable', message: 'Permission denied' }] },
+      },
+      {
+        name: 'repository listing',
+        path: '/installation/repositories',
+        stage: 'repository_listing',
+        status: 403,
+        body: { message: 'Resource not accessible by integration' },
+      },
+    ]
+
+    for (const item of cases) {
+      await subtests.test(item.name, async () => {
+        mockGitHub({ failAt: item.path, failWith: item.status, failBody: item.body })
+        const challenge = await beginExistingConnection()
+        const logged = []
+        const originalError = console.error
+        console.error = (...values) => logged.push(values.join(' '))
+        let response
+        try {
+          response = await submitExistingConnection(challenge)
+        } finally {
+          console.error = originalError
+        }
+
+        assert.equal(response.status, 502)
+        assert.deepEqual(await response.json(), { error: 'verification_unavailable' })
+        assert.equal(response.headers.getSetCookie().length, 0)
+        assert.equal(logged.length, 1)
+        const diagnostic = JSON.parse(logged[0])
+        assert.equal(diagnostic.event, 'github_installation_verification_failed')
+        assert.equal(diagnostic.stage, item.stage)
+        assert.equal(diagnostic.status, item.status)
+        assert.equal(diagnostic.message, item.body.message)
+        assert.equal(diagnostic.requestId, 'MOCK-REQUEST-ID')
+        if (item.body.errors) assert.equal(diagnostic.code, item.body.errors[0].code)
+        assert.equal(logged[0].includes(env.GITHUB_APP_PRIVATE_KEY), false)
+        assert.equal(logged[0].includes(installToken), false)
+        assert.equal(logged[0].includes(challenge.cookie), false)
+      })
+    }
+  })
+
+  await context.test('logs safe network and malformed-response diagnostics without changing the public error', async (subtests) => {
+    const cases = [
+      {
+        name: 'network failure',
+        options: { networkFailAt: `/app/installations/${installationId}` },
+        stage: 'installation_lookup',
+        status: null,
+        code: 'NETWORK_ERROR',
+      },
+      {
+        name: 'invalid JSON response',
+        options: { invalidJsonAt: `/app/installations/${installationId}` },
+        stage: 'installation_lookup',
+        status: 200,
+        code: 'INVALID_JSON_RESPONSE',
+      },
+    ]
+
+    for (const item of cases) {
+      await subtests.test(item.name, async () => {
+        mockGitHub(item.options)
+        const challenge = await beginExistingConnection()
+        const logged = []
+        const originalError = console.error
+        console.error = (...values) => logged.push(values.join(' '))
+        let response
+        try {
+          response = await submitExistingConnection(challenge)
+        } finally {
+          console.error = originalError
+        }
+
+        assert.equal(response.status, 502)
+        assert.deepEqual(await response.json(), { error: 'verification_unavailable' })
+        const diagnostic = JSON.parse(logged[0])
+        assert.equal(diagnostic.stage, item.stage)
+        assert.equal(diagnostic.status, item.status)
+        assert.equal(diagnostic.code, item.code)
+      })
+    }
+  })
+
+  await context.test('redacts token and JWT-shaped strings from GitHub error messages', async () => {
+    const fakeToken = 'ghp_abcdefghijklmnopqrstuvwxyz0123456789ABCDEF'
+    const fakeJwt = 'eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.signaturevalue123'
+    mockGitHub({
+      failAt: `/app/installations/${installationId}`,
+      failWith: 401,
+      failBody: { message: `Rejected ${fakeToken} ${fakeJwt}` },
+    })
     const challenge = await beginExistingConnection()
-    const response = await submitExistingConnection(challenge)
-    assert.equal(response.status, 502)
-    assert.equal((await response.json()).error, 'verification_unavailable')
-    assert.equal(response.headers.getSetCookie().length, 0)
-    assert.equal(fetchCalls.length, 1)
+    const logged = []
+    const originalError = console.error
+    console.error = (...values) => logged.push(values.join(' '))
+    try {
+      const response = await submitExistingConnection(challenge)
+      assert.equal(response.status, 502)
+      assert.deepEqual(await response.json(), { error: 'verification_unavailable' })
+    } finally {
+      console.error = originalError
+    }
+    assert.equal(logged.length, 1)
+    assert.equal(logged[0].includes(fakeToken), false)
+    assert.equal(logged[0].includes(fakeJwt), false)
+    assert.match(JSON.parse(logged[0]).message, /\[REDACTED_TOKEN\].*\[REDACTED_JWT\]/)
+  })
+
+  await context.test('redacts the exact bearer credential if GitHub echoes it in an error', async () => {
+    mockGitHub({
+      failAt: '/installation/repositories',
+      failWith: 401,
+      failBody: (init) => ({ message: `Rejected ${init.headers.Authorization}` }),
+    })
+    const challenge = await beginExistingConnection()
+    const logged = []
+    const originalError = console.error
+    console.error = (...values) => logged.push(values.join(' '))
+    try {
+      const response = await submitExistingConnection(challenge)
+      assert.equal(response.status, 502)
+      assert.deepEqual(await response.json(), { error: 'verification_unavailable' })
+    } finally {
+      console.error = originalError
+    }
+    assert.equal(logged.length, 1)
+    assert.equal(logged[0].includes(fetchCalls[0].init.headers.Authorization), false)
+    assert.match(JSON.parse(logged[0]).message, /\[REDACTED_SECRET\]/)
   })
 
   await context.test('rejects installations outside the required app/account/scope/permission/repository', async (subtests) => {

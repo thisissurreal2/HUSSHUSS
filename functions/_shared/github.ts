@@ -48,10 +48,23 @@ const SESSION_TTL_SECONDS = 10 * 60
 const textEncoder = new TextEncoder()
 const textDecoder = new TextDecoder()
 
+type GitHubApiStage = 'installation_lookup' | 'installation_token_creation' | 'repository_listing'
+
+export type GitHubApiDiagnostic = {
+  stage: GitHubApiStage
+  status: number | null
+  code?: string
+  message?: string
+  requestId?: string
+}
+
 export class GitHubApiError extends Error {
-  constructor() {
+  readonly diagnostic: GitHubApiDiagnostic
+
+  constructor(diagnostic: GitHubApiDiagnostic) {
     super('GitHub verification request failed.')
     this.name = 'GitHubApiError'
+    this.diagnostic = diagnostic
   }
 }
 
@@ -212,9 +225,74 @@ async function createAppJwt(appId: string, pem: string): Promise<string> {
   return `${signingInput}.${base64UrlEncode(new Uint8Array(signature))}`
 }
 
-async function githubJson<T>(url: string, token: string, method = 'GET', body?: unknown): Promise<T> {
+function safeDiagnosticText(value: unknown, limit: number, secrets: string[] = []): string | undefined {
+  if (typeof value !== 'string') return undefined
+  const withoutControls = Array.from(value, (character) => {
+    const code = character.charCodeAt(0)
+    return code <= 0x1f || code === 0x7f ? ' ' : character
+  }).join('')
+  let safe = withoutControls
+    .replace(/-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/gi, '[REDACTED_PRIVATE_KEY]')
+    .replace(/\b(?:gh[pousr]_[A-Za-z0-9_]{20,}|github_pat_[A-Za-z0-9_]{20,})\b/g, '[REDACTED_TOKEN]')
+    .replace(/\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b/g, '[REDACTED_JWT]')
+    .replace(/(authorization\s*[:=]\s*bearer\s+)[^\s,;"']+/gi, '$1[REDACTED]')
+  for (const secret of secrets) {
+    if (secret) safe = safe.split(secret).join('[REDACTED_SECRET]')
+  }
+  safe = safe
+    .trim()
+    .slice(0, limit)
+  return safe || undefined
+}
+
+async function githubErrorDiagnostic(
+  response: Response,
+  stage: GitHubApiStage,
+  requestToken: string,
+): Promise<GitHubApiDiagnostic> {
+  let payload: unknown
   try {
-    const response = await fetch(url, {
+    payload = await response.json()
+  } catch {
+    payload = null
+  }
+
+  let code: string | undefined
+  let message: string | undefined
+  if (isObject(payload)) {
+    message = safeDiagnosticText(payload.message, 300, [requestToken])
+    if (Array.isArray(payload.errors)) {
+      for (const item of payload.errors) {
+        if (!isObject(item)) continue
+        code = safeDiagnosticText(item.code, 64)
+        if (!message) message = safeDiagnosticText(item.message, 300, [requestToken])
+        if (code) break
+      }
+    }
+    if (!code) code = safeDiagnosticText(payload.code, 64)
+  }
+
+  return {
+    stage,
+    status: response.status,
+    ...(code ? { code } : {}),
+    ...(message ? { message } : {}),
+    ...(safeDiagnosticText(response.headers.get('x-github-request-id'), 100)
+      ? { requestId: safeDiagnosticText(response.headers.get('x-github-request-id'), 100) }
+      : {}),
+  }
+}
+
+async function githubJson<T>(
+  url: string,
+  token: string,
+  stage: GitHubApiStage,
+  method = 'GET',
+  body?: unknown,
+): Promise<T> {
+  let response: Response
+  try {
+    response = await fetch(url, {
       method,
       headers: {
         Accept: 'application/vnd.github+json',
@@ -224,11 +302,27 @@ async function githubJson<T>(url: string, token: string, method = 'GET', body?: 
       },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     })
-    if (!response.ok) throw new GitHubApiError()
+  } catch {
+    throw new GitHubApiError({
+      stage,
+      status: null,
+      code: 'NETWORK_ERROR',
+      message: 'No HTTP response was received from GitHub.',
+    })
+  }
+  if (!response.ok) throw new GitHubApiError(await githubErrorDiagnostic(response, stage, token))
+  try {
     return await response.json() as T
-  } catch (error) {
-    if (error instanceof GitHubApiError) throw error
-    throw new GitHubApiError()
+  } catch {
+    throw new GitHubApiError({
+      stage,
+      status: response.status,
+      code: 'INVALID_JSON_RESPONSE',
+      message: 'GitHub returned a successful status with an invalid JSON response.',
+      ...(safeDiagnosticText(response.headers.get('x-github-request-id'), 100)
+        ? { requestId: safeDiagnosticText(response.headers.get('x-github-request-id'), 100) }
+        : {}),
+    })
   }
 }
 
@@ -243,6 +337,7 @@ export async function verifyInstallation(
   const installation = await githubJson<GitHubInstallation>(
     `https://api.github.com/app/installations/${installationId}`,
     appJwt,
+    'installation_lookup',
   )
   if (!isObject(installation) || installation.id !== Number(installationId)
     || installation.app_id !== Number(config.appId)
@@ -259,6 +354,7 @@ export async function verifyInstallation(
   const accessToken = await githubJson<GitHubInstallationToken>(
     `https://api.github.com/app/installations/${installationId}/access_tokens`,
     appJwt,
+    'installation_token_creation',
     'POST',
     { permissions: { metadata: 'read' } },
   )
@@ -269,6 +365,7 @@ export async function verifyInstallation(
   const repositoryList = await githubJson<GitHubRepositoriesResponse>(
     'https://api.github.com/installation/repositories?per_page=100',
     accessToken.token,
+    'repository_listing',
   )
   if (!isObject(repositoryList) || repositoryList.total_count !== 1
     || !Array.isArray(repositoryList.repositories) || repositoryList.repositories.length !== 1) {
