@@ -314,6 +314,7 @@ async function githubJson<T>(
       headers: {
         Accept: 'application/vnd.github+json',
         Authorization: `Bearer ${token}`,
+        'User-Agent': 'husshuss-cloud-sync',
         'X-GitHub-Api-Version': API_VERSION,
         ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
       },
@@ -531,3 +532,4 @@ export function jsonResponse(body: unknown, status = 200, extraHeaders?: Headers
     },
   })
 }
+
