@@ -75,6 +75,9 @@ export function BackupRecovery({ onRestored }: { onRestored: () => void }) {
   const [pendingCount, setPendingCount] = useState<number | null>(null)
   const [githubStatus, setGithubStatus] = useState<GitHubConnectionStatus>({ kind: 'checking' })
   const [connectionBusy, setConnectionBusy] = useState(false)
+  const [existingConnectionOpen, setExistingConnectionOpen] = useState(false)
+  const [existingInstallState, setExistingInstallState] = useState<string | null>(null)
+  const [installationId, setInstallationId] = useState('')
   const [connectionMessage, setConnectionMessage] = useState<string | null>(() => {
     if (typeof window === 'undefined') return null
     return new URLSearchParams(window.location.search).get('github_connection') === 'failed'
@@ -129,6 +132,81 @@ export function BackupRecovery({ onRestored }: { onRestored: () => void }) {
       setGithubStatus(await requestGitHubStatus())
     } catch {
       setGithubStatus({ kind: 'unavailable' })
+    }
+  }
+
+  async function prepareExistingInstallation() {
+    setConnectionBusy(true)
+    setConnectionMessage(null)
+    try {
+      const response = await fetch('/api/github/connect-existing', {
+        cache: 'no-store',
+        credentials: 'same-origin',
+      })
+      if (!response.ok) throw new Error('Connection setup is unavailable.')
+      const value: unknown = await response.json()
+      if (typeof value !== 'object' || value === null || Array.isArray(value)
+        || !('configured' in value) || value.configured !== true
+        || !('state' in value) || typeof value.state !== 'string') {
+        throw new Error('Invalid connection setup response.')
+      }
+      setExistingInstallState(value.state)
+      setExistingConnectionOpen(true)
+    } catch {
+      setConnectionMessage('Could not start secure verification. Check the connection and try again.')
+    } finally {
+      setConnectionBusy(false)
+    }
+  }
+
+  async function connectExistingInstallation() {
+    if (!existingInstallState || !/^\d{1,20}$/.test(installationId)) {
+      setConnectionMessage('Enter the numeric installation ID from your GitHub installation settings.')
+      return
+    }
+
+    setConnectionBusy(true)
+    setConnectionMessage(null)
+    try {
+      const response = await fetch('/api/github/connect-existing', {
+        method: 'POST',
+        cache: 'no-store',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ state: existingInstallState, installationId }),
+      })
+      const value: unknown = await response.json()
+      if (!response.ok) {
+        setConnectionMessage(response.status === 502
+          ? 'GitHub could not be reached to verify this installation. Try again shortly.'
+          : 'GitHub did not verify this installation for the required app, account, permission, and private repository.')
+        setExistingInstallState(null)
+        return
+      }
+      if (typeof value !== 'object' || value === null || Array.isArray(value)
+        || !('configured' in value) || value.configured !== true
+        || !('connected' in value) || value.connected !== true
+        || !('verified' in value) || value.verified !== true
+        || !('account' in value) || value.account !== 'thisissurreal2'
+        || !('repository' in value) || value.repository !== 'thisissurreal2/HUSSHUSS-data'
+        || !('visibility' in value) || value.visibility !== 'private'
+        || !('verifiedAt' in value) || typeof value.verifiedAt !== 'string'
+        || !Number.isFinite(Date.parse(value.verifiedAt))) {
+        setConnectionMessage('The connection service returned an invalid verification response.')
+        setExistingInstallState(null)
+        return
+      }
+
+      setGithubStatus({ kind: 'connected', verifiedAt: value.verifiedAt })
+      setConnectionMessage('The existing private repository installation was verified for this device.')
+      setExistingInstallState(null)
+      setExistingConnectionOpen(false)
+      setInstallationId('')
+    } catch {
+      setConnectionMessage('Could not verify the installation. Check the connection and try again.')
+      setExistingInstallState(null)
+    } finally {
+      setConnectionBusy(false)
     }
   }
 
@@ -281,14 +359,24 @@ export function BackupRecovery({ onRestored }: { onRestored: () => void }) {
           {connectionMessage && <p className="connection-message" role="status">{connectionMessage}</p>}
           <div className="backup-actions connection-actions">
             {githubStatus.kind === 'not-connected' && (
-              <button
-                className="button-primary"
-                type="button"
-                disabled={connectionBusy}
-                onClick={() => { window.location.assign('/api/github/connect') }}
-              >
-                Connect private repository
-              </button>
+              <>
+                <button
+                  className="button-primary"
+                  type="button"
+                  disabled={connectionBusy}
+                  onClick={() => { window.location.assign('/api/github/connect') }}
+                >
+                  Install GitHub App
+                </button>
+                <button
+                  className="button-secondary"
+                  type="button"
+                  disabled={connectionBusy}
+                  onClick={() => void prepareExistingInstallation()}
+                >
+                  Already installed? Connect this device
+                </button>
+              </>
             )}
             {(githubStatus.kind === 'connected' || githubStatus.kind === 'verification-unavailable') && (
               <button className="button-secondary" type="button" disabled={connectionBusy} onClick={() => void disconnectGitHub()}>
@@ -304,6 +392,47 @@ export function BackupRecovery({ onRestored }: { onRestored: () => void }) {
               Check status
             </button>
           </div>
+          {existingConnectionOpen && githubStatus.kind === 'not-connected' && (
+            <div className="existing-installation-connect">
+              <label>
+                <span>GitHub installation ID</span>
+                <input
+                  autoComplete="off"
+                  inputMode="numeric"
+                  maxLength={20}
+                  pattern="[0-9]{1,20}"
+                  value={installationId}
+                  onChange={(event) => setInstallationId(event.target.value)}
+                  aria-describedby="existing-installation-help"
+                />
+              </label>
+              <p id="existing-installation-help">
+                Find the numeric ID in the GitHub installation settings page URL. HUSSHUSS treats it as untrusted and verifies it directly with GitHub.
+              </p>
+              <div className="backup-actions">
+                <button
+                  className="button-primary"
+                  type="button"
+                  disabled={connectionBusy || !existingInstallState || !/^\d{1,20}$/.test(installationId)}
+                  onClick={() => void connectExistingInstallation()}
+                >
+                  {connectionBusy ? 'Verifying…' : 'Verify and connect'}
+                </button>
+                <button
+                  className="button-secondary"
+                  type="button"
+                  disabled={connectionBusy}
+                  onClick={() => {
+                    setExistingConnectionOpen(false)
+                    setExistingInstallState(null)
+                    setInstallationId('')
+                  }}
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
         </div>
         <div className="backup-queue-count">
           <strong>{pendingCount === null ? '—' : pendingCount}</strong>

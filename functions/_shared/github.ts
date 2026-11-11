@@ -19,8 +19,10 @@ export type VerifiedInstallation = {
 }
 
 type GitHubInstallation = {
+  id: number
   app_id: number
   account: { login: string } | null
+  permissions: Record<string, string>
   repository_selection: string
   target_type: string
 }
@@ -45,6 +47,13 @@ const STATE_COOKIE = '__Host-husshuss_github_state'
 const SESSION_TTL_SECONDS = 10 * 60
 const textEncoder = new TextEncoder()
 const textDecoder = new TextDecoder()
+
+export class GitHubApiError extends Error {
+  constructor() {
+    super('GitHub verification request failed.')
+    this.name = 'GitHubApiError'
+  }
+}
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -204,18 +213,23 @@ async function createAppJwt(appId: string, pem: string): Promise<string> {
 }
 
 async function githubJson<T>(url: string, token: string, method = 'GET', body?: unknown): Promise<T> {
-  const response = await fetch(url, {
-    method,
-    headers: {
-      Accept: 'application/vnd.github+json',
-      Authorization: `Bearer ${token}`,
-      'X-GitHub-Api-Version': API_VERSION,
-      ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
-    },
-    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-  })
-  if (!response.ok) throw new Error('GitHub could not verify the private repository installation.')
-  return await response.json() as T
+  try {
+    const response = await fetch(url, {
+      method,
+      headers: {
+        Accept: 'application/vnd.github+json',
+        Authorization: `Bearer ${token}`,
+        'X-GitHub-Api-Version': API_VERSION,
+        ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
+      },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    })
+    if (!response.ok) throw new GitHubApiError()
+    return await response.json() as T
+  } catch (error) {
+    if (error instanceof GitHubApiError) throw error
+    throw new GitHubApiError()
+  }
 }
 
 export async function verifyInstallation(
@@ -230,11 +244,15 @@ export async function verifyInstallation(
     `https://api.github.com/app/installations/${installationId}`,
     appJwt,
   )
-  if (!isObject(installation) || installation.app_id !== Number(config.appId)
+  if (!isObject(installation) || installation.id !== Number(installationId)
+    || installation.app_id !== Number(config.appId)
     || installation.target_type !== 'User'
     || installation.repository_selection !== 'selected'
     || !installation.account || typeof installation.account.login !== 'string'
-    || installation.account.login.toLowerCase() !== config.repository.split('/')[0]) {
+    || installation.account.login.toLowerCase() !== config.repository.split('/')[0]
+    || !isObject(installation.permissions)
+    || Object.keys(installation.permissions).length !== 1
+    || installation.permissions.metadata !== 'read') {
     throw new Error('Installation is outside the configured account or repository.')
   }
 

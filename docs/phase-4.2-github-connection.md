@@ -27,7 +27,12 @@ Do not create the App until you are ready to configure a deployed HTTPS origin. 
 5. Set installation access to **Only select repositories**, then install the App on exactly `thisissurreal2/HUSSHUSS-data`. Keep that repository private. Do not install on the source-code repository or all repositories.
 6. Generate an App private key. Store the downloaded PEM only as a Cloudflare secret; never add it to this repo, a Vite variable, browser storage, or chat.
 
-The connection flow begins when the user chooses **Connect private repository**. HUSSHUSS signs a short-lived state, binds it to a Secure HttpOnly `SameSite=Lax` browser cookie (needed for GitHub's top-level callback navigation), and redirects to the App's GitHub installation page. GitHub returns to the configured Setup URL. The backend checks the state and browser cookie, validates the installation and account using an App JWT, creates an in-memory installation token limited to Metadata read, and confirms that the only accessible repository is the exact private allow-listed repository. Only then is a short-lived first-party `SameSite=Strict` session cookie issued.
+There are two connection paths:
+
+1. **First-time installation:** choose **Install GitHub App**. HUSSHUSS creates signed, expiring state and an HttpOnly state cookie, then opens the App installation URL. GitHub redirects to the configured Setup URL after the user installs or updates the App. The callback validates the state and cookie, then verifies the installation server-side before issuing a short-lived first-party `SameSite=Strict` session cookie.
+2. **Already installed / another browser:** choose **Already installed? Connect this device**. HUSSHUSS obtains a fresh signed, expiring state and HttpOnly state cookie, then asks for the numeric installation ID shown in the GitHub installation settings URL. Submitting the ID and state uses a same-origin JSON POST, exact Origin validation, and the state/cookie check. The ID is untrusted input: the backend uses its GitHub App private key to fetch that installation, verifies its ID and App ID, confirms the exact `thisissurreal2` user account, selected-only repository scope, and Metadata-only read permission, then creates a short-lived installation token restricted to Metadata read. It uses that token to confirm exactly one accessible repo, `thisissurreal2/HUSSHUSS-data`, and that it is private. Only after all checks pass does it issue the session cookie. The installation ID is never itself treated as proof of identity.
+
+GitHub's Setup URL is a post-install/update destination, not a general callback for reconnecting an installation that already exists. Opening the App's installation URL for an existing installation can lead to its settings page without invoking the Setup URL. That is why the separate existing-installation path is necessary. For first-time installs, the Setup URL should remain `https://<your-app-origin>/api/github/callback`; the callback must verify the supplied installation ID rather than trusting it.
 
 ## Cloudflare Pages setup (manual; not performed)
 
@@ -52,7 +57,9 @@ Use the Cloudflare dashboard's secret input for all private values. Do not place
 
 4. Deploy the site and Functions. Confirm the site is HTTPS and the App's Setup URL exactly matches `/api/github/callback` on this origin.
 5. Check `/api/github/status` before connecting. An unconfigured backend responds with `configured: false` and `connected: false`; it never claims a connection based on local state. A Vite-only local server does not run Pages Functions and therefore cannot perform or verify a GitHub connection.
-6. Only after reviewing the deployed routes and secrets, install the App on the one private data repository and use the UI to connect. Verify the UI names the private repository and disconnect it afterward if desired.
+6. Only after reviewing the deployed routes and secrets, install the App on the one private data repository. For a first installation, select **Install GitHub App**. For this already-installed App or a new browser/device, select **Already installed? Connect this device** and enter the numeric installation ID from the GitHub settings URL. Verify the UI names the private repository and disconnect it afterward if desired.
+
+If GitHub opens the existing installation settings page rather than returning to HUSSHUSS, no install/update callback occurred. Return to HUSSHUSS and use the **Already installed? Connect this device** flow instead.
 
 Cloudflare secret values must be configured separately for each environment. Use the dashboard's environment-specific bindings; do not promote preview secrets into production by copying them into source control.
 
