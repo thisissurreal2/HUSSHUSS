@@ -10,6 +10,7 @@ import {
   restorePreviousDataSnapshot,
   type BackupBundle,
 } from './backupStorage'
+import { forgetPairingSecret, getPairingSecret, MIN_PAIRING_SECRET_LENGTH, pairingHeaders, savePairingSecret } from './pairing'
 import { getPendingLocalChanges } from './localSyncQueue'
 import { withConnectionTimeout } from './connectionRequest'
 import { readRemoteSyncState, writeRemoteSyncState, type RemoteSyncState } from './localDatabase'
@@ -49,7 +50,8 @@ type GitHubConnectionStatus =
   | { kind: 'unavailable' }
 
 async function requestGitHubStatus(): Promise<GitHubConnectionStatus> {
-  const response = await fetch('/api/github/status', { cache: 'no-store', credentials: 'same-origin' })
+  const response = await fetch('/api/github/status', { cache: 'no-store', credentials: 'same-origin', headers: pairingHeaders() })
+  if (response.status === 401) return { kind: 'not-connected' }
   if (response.status === 503) {
     const value: unknown = await response.json().catch(() => null)
     if (typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -187,6 +189,14 @@ export function BackupRecovery({ onRestored }: { onRestored: () => void }) {
   }
 
   async function prepareExistingInstallation() {
+    if (!getPairingSecret()) {
+      const entered = window.prompt('Enter your HUSSHUSS pairing secret.')
+      if (!entered || entered.trim().length < MIN_PAIRING_SECRET_LENGTH) {
+        setConnectionMessage('A pairing secret of at least 32 characters is required.')
+        return
+      }
+      savePairingSecret(entered)
+    }
     setConnectionBusy(true)
     setConnectionMessage(null)
     try {
@@ -194,8 +204,10 @@ export function BackupRecovery({ onRestored }: { onRestored: () => void }) {
         const response = await fetch('/api/github/connect-existing', {
           cache: 'no-store',
           credentials: 'same-origin',
+          headers: pairingHeaders(),
           signal,
         })
+        if (response.status === 401) forgetPairingSecret()
         if (!response.ok) throw new Error('Connection setup is unavailable.')
         return await response.json()
       })
@@ -227,7 +239,7 @@ export function BackupRecovery({ onRestored }: { onRestored: () => void }) {
           method: 'POST',
           cache: 'no-store',
           credentials: 'same-origin',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { ...pairingHeaders(), 'Content-Type': 'application/json' },
           body: JSON.stringify({ state: existingInstallState, installationId }),
           signal,
         })

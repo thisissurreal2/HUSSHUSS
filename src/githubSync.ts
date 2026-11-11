@@ -1,3 +1,4 @@
+import { forgetPairingSecret, pairingHeaders } from './pairing'
 import { withConnectionTimeout } from './connectionRequest'
 
 export type RemoteBackupInfo = {
@@ -82,6 +83,7 @@ async function requestJson<T>(path: string, init?: RequestInit): Promise<{ respo
       cache: 'no-store',
       credentials: 'same-origin',
       ...init,
+      headers: { ...pairingHeaders(), ...(init?.headers as Record<string, string> | undefined) },
       signal,
     })
     let value: unknown
@@ -96,6 +98,7 @@ async function requestJson<T>(path: string, init?: RequestInit): Promise<{ respo
 
 async function requireSuccess<T>(path: string, init?: RequestInit): Promise<T> {
   const { response, value } = await requestJson<T>(path, init)
+  if (response.status === 401 && isObject(value) && value.error === 'pairing_required') forgetPairingSecret()
   if (!response.ok) {
     if (response.status === 409 && isObject(value) && value.error === 'remote_conflict') {
       throw new RemoteSyncError('remote_conflict', parseRemoteStatus(value.remote))
