@@ -1,7 +1,9 @@
-import { isAthleticData, ATHLETIC_STORAGE_KEY, type AthleticData } from './athleticStorage'
+import { isAthleticData, readAthleticData, ATHLETIC_STORAGE_KEY, type AthleticData } from './athleticStorage'
 import { isMeasurementData, MEASUREMENT_STORAGE_KEY, type MeasurementData } from './measurementStorage'
-import { createInitialData, isAppData, STORAGE_KEY, type AppData } from './workoutStorage'
+import { createInitialData, isAppData, normalizeAppData, readAppData, STORAGE_KEY, type AppData } from './workoutStorage'
+import { readMeasurementData } from './measurementStorage'
 import { queueLocalSnapshots } from './localSyncQueue'
+import { readConsistentPrimarySnapshots } from './localDatabase'
 
 export const BACKUP_FORMAT = 'husshuss-backup'
 export const BACKUP_VERSION = 1
@@ -100,43 +102,44 @@ function isEncryptedBackup(value: unknown): value is EncryptedBackup {
   }
 }
 
-function createBundle(): BackupBundle {
-  const workoutRaw = window.localStorage.getItem(STORAGE_KEY)
-  const measurementRaw = window.localStorage.getItem(MEASUREMENT_STORAGE_KEY)
-  const athleticRaw = window.localStorage.getItem(ATHLETIC_STORAGE_KEY)
-  const workouts = workoutRaw === null ? createInitialData() : JSON.parse(workoutRaw) as unknown
-  const measurements = measurementRaw === null
-    ? { version: 1, sessions: [] }
-    : JSON.parse(measurementRaw) as unknown
-  const athletic = athleticRaw === null
-    ? { version: 1, customAssessments: [], records: [] }
-    : JSON.parse(athleticRaw) as unknown
-
-  if (!isAppData(workouts)) {
-    throw new Error('Workout data is invalid or unsupported. It was not included in the backup.')
+async function createBundle(): Promise<BackupBundle> {
+  const [workouts, measurements, athletic] = await Promise.all([
+    readAppData(),
+    readMeasurementData(),
+    readAthleticData(),
+  ])
+  if (workouts.error) throw new Error(`Workout data could not be included in the backup: ${workouts.error}`)
+  if (measurements.error) throw new Error(`Measurement data could not be included in the backup: ${measurements.error}`)
+  if (athletic.error) throw new Error(`Athletic assessment data could not be included in the backup: ${athletic.error}`)
+  const snapshots = await readConsistentPrimarySnapshots({
+    workouts: isAppData,
+    measurements: isMeasurementData,
+    athletic: isAthleticData,
+  })
+  if (!isAppData(snapshots.workouts)
+    || !isMeasurementData(snapshots.measurements)
+    || !isAthleticData(snapshots.athletic)) {
+    throw new Error('Local data changed or became invalid while creating the backup.')
   }
-  if (!isMeasurementData(measurements)) {
-    throw new Error('Measurement data is invalid or unsupported. It was not included in the backup.')
-  }
-  if (!isAthleticData(athletic)) {
-    throw new Error('Athletic assessment data is invalid or unsupported. It was not included in the backup.')
-  }
-
   return {
     format: BACKUP_FORMAT,
     version: BACKUP_VERSION,
     exportedAt: new Date().toISOString(),
-    data: { workouts, measurements, athletic },
+    data: {
+      workouts: snapshots.workouts,
+      measurements: snapshots.measurements,
+      athletic: snapshots.athletic,
+    },
   }
 }
 
-export function createPlainBackup(): string {
-  const text = JSON.stringify(createBundle(), null, 2)
+export async function createPlainBackup(): Promise<string> {
+  const text = JSON.stringify(await createBundle(), null, 2)
   if (text.length > 50_000_000) throw new Error('This backup is too large to export (maximum 50 MB).')
   return text
 }
 
-export async function createEncryptedBackup(passphrase: string): Promise<string> {
+async function encryptBundle(bundle: BackupBundle, passphrase: string): Promise<string> {
   if (passphrase.length < 12) throw new Error('Use a backup passphrase with at least 12 characters.')
   if (passphrase.length > 1024) throw new Error('The backup passphrase must be no more than 1,024 characters.')
   const crypto = requireCrypto()
@@ -146,6 +149,8 @@ export async function createEncryptedBackup(passphrase: string): Promise<string>
   crypto.getRandomValues(iv)
   const saltText = bytesToBase64(salt)
   const ivText = bytesToBase64(iv)
+  const plainText = JSON.stringify(bundle, null, 2)
+  if (plainText.length > 50_000_000) throw new Error('This backup is too large to export (maximum 50 MB).')
   const material = await crypto.subtle.importKey('raw', toArrayBuffer(encoder.encode(passphrase)), 'PBKDF2', false, ['deriveKey'])
   const key = await crypto.subtle.deriveKey(
     { name: 'PBKDF2', hash: 'SHA-256', salt: toArrayBuffer(salt), iterations: ENCRYPTION_ITERATIONS },
@@ -161,7 +166,7 @@ export async function createEncryptedBackup(passphrase: string): Promise<string>
       additionalData: toArrayBuffer(encryptionAad(saltText, ivText, ENCRYPTION_ITERATIONS)),
     },
     key,
-    toArrayBuffer(encoder.encode(createPlainBackup())),
+    toArrayBuffer(encoder.encode(plainText)),
   )
   const result: EncryptedBackup = {
     format: ENCRYPTED_BACKUP_FORMAT,
@@ -174,6 +179,36 @@ export async function createEncryptedBackup(passphrase: string): Promise<string>
     ciphertext: bytesToBase64(new Uint8Array(encrypted)),
   }
   return JSON.stringify(result, null, 2)
+}
+
+function bytesToHex(bytes: Uint8Array): string {
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('')
+}
+
+export async function fingerprintBackupData(data: BackupBundle['data']): Promise<string> {
+  const digest = await requireCrypto().subtle.digest('SHA-256', encoder.encode(JSON.stringify(data)))
+  return bytesToHex(new Uint8Array(digest))
+}
+
+export async function getCurrentBackupFingerprint(): Promise<string> {
+  const bundle = await createBundle()
+  return fingerprintBackupData(bundle.data)
+}
+
+export async function createEncryptedBackupWithFingerprint(
+  passphrase: string,
+): Promise<{ encryptedBackup: string; localFingerprint: string }> {
+  const bundle = await createBundle()
+  const [encryptedBackup, localFingerprint] = await Promise.all([
+    encryptBundle(bundle, passphrase),
+    fingerprintBackupData(bundle.data),
+  ])
+  return { encryptedBackup, localFingerprint }
+}
+
+export async function createEncryptedBackup(passphrase: string): Promise<string> {
+  const bundle = await createBundle()
+  return encryptBundle(bundle, passphrase)
 }
 
 export async function parseBackup(text: string, passphrase: string): Promise<BackupBundle> {
@@ -226,11 +261,6 @@ export async function parseBackup(text: string, passphrase: string): Promise<Bac
   return parsed
 }
 
-function restoreRawValue(key: string, rawValue: string | null): void {
-  if (rawValue === null) window.localStorage.removeItem(key)
-  else window.localStorage.setItem(key, rawValue)
-}
-
 type RestoreSafetySnapshot = {
   createdAt: string
   values: Record<typeof STORAGE_KEY | typeof MEASUREMENT_STORAGE_KEY | typeof ATHLETIC_STORAGE_KEY, string | null>
@@ -267,7 +297,7 @@ export function getRestoreSafetyDate(): string | null {
 
 function parseSafetyValue<T>(
   raw: string | null,
-  validator: (value: unknown) => value is T,
+  normalize: (value: unknown) => T | null,
   fallback: T,
   label: string,
 ): T {
@@ -278,35 +308,49 @@ function parseSafetyValue<T>(
   } catch {
     throw new Error(`The recovery snapshot's ${label} data is not valid JSON.`)
   }
-  if (!validator(parsed)) throw new Error(`The recovery snapshot's ${label} data is invalid or unsupported.`)
-  return parsed
+  const value = normalize(parsed)
+  if (value === null) throw new Error(`The recovery snapshot's ${label} data is invalid or unsupported.`)
+  return value
 }
 
 export async function restorePreviousDataSnapshot(): Promise<void> {
   const safetySnapshot = readSafetySnapshot()
   if (!safetySnapshot) throw new Error('No valid pre-restore recovery snapshot is available.')
-  const keys = [STORAGE_KEY, MEASUREMENT_STORAGE_KEY, ATHLETIC_STORAGE_KEY] as const
-  const current = Object.fromEntries(keys.map((key) => [key, window.localStorage.getItem(key)]))
+  const [currentWorkouts, currentMeasurements, currentAthletic] = await Promise.all([
+    readAppData(),
+    readMeasurementData(),
+    readAthleticData(),
+  ])
+  const currentErrors = [currentWorkouts.error, currentMeasurements.error, currentAthletic.error].filter(Boolean)
+  if (currentErrors.length > 0) throw new Error(`Current data could not be secured before recovery: ${currentErrors.join(' ')}`)
+  const current = {
+    [STORAGE_KEY]: JSON.stringify(currentWorkouts.data),
+    [MEASUREMENT_STORAGE_KEY]: JSON.stringify(currentMeasurements.data),
+    [ATHLETIC_STORAGE_KEY]: JSON.stringify(currentAthletic.data),
+  }
   const workouts = parseSafetyValue(
-    safetySnapshot.values[STORAGE_KEY], isAppData, createInitialData(), 'workout',
+    safetySnapshot.values[STORAGE_KEY], normalizeAppData, createInitialData(), 'workout',
   )
   const measurements = parseSafetyValue(
-    safetySnapshot.values[MEASUREMENT_STORAGE_KEY], isMeasurementData,
+    safetySnapshot.values[MEASUREMENT_STORAGE_KEY],
+    (value) => isMeasurementData(value) ? value : null,
     { version: 1, sessions: [] }, 'measurement',
   )
   const athletic = parseSafetyValue(
-    safetySnapshot.values[ATHLETIC_STORAGE_KEY], isAthleticData,
+    safetySnapshot.values[ATHLETIC_STORAGE_KEY],
+    (value) => isAthleticData(value) ? value : null,
     { version: 1, customAssessments: [], records: [] }, 'athletic assessment',
   )
 
-  window.localStorage.setItem(RESTORE_SAFETY_KEY, JSON.stringify({
+  const previousSafetyRaw = window.localStorage.getItem(RESTORE_SAFETY_KEY)
+  const currentSafety = JSON.stringify({
     format: 'husshuss-restore-safety',
     version: 1,
     createdAt: new Date().toISOString(),
     values: current,
-  }))
+  })
+  window.localStorage.setItem(RESTORE_SAFETY_KEY, currentSafety)
   try {
-    for (const key of keys) restoreRawValue(key, safetySnapshot.values[key])
     await queueLocalSnapshots([
       { category: 'workouts', snapshot: workouts },
       { category: 'measurements', snapshot: measurements },
@@ -314,20 +358,30 @@ export async function restorePreviousDataSnapshot(): Promise<void> {
     ])
   } catch (error) {
     try {
-      for (const key of keys) restoreRawValue(key, current[key])
+      if (previousSafetyRaw === null) window.localStorage.removeItem(RESTORE_SAFETY_KEY)
+      else window.localStorage.setItem(RESTORE_SAFETY_KEY, previousSafetyRaw)
     } catch {
-      throw new Error(`Recovery restore failed and automatic rollback could not finish. The prior values are preserved under ${RESTORE_SAFETY_KEY}.`)
+      throw new Error(`Recovery failed and the safety pointer could not be restored. Your database transaction was atomic; the original data remains available under ${RESTORE_SAFETY_KEY}.`)
     }
-    throw new Error(error instanceof Error
-      ? `Recovery restore failed; the current data was restored. ${error.message}`
-      : 'Recovery restore failed; the current data was restored.')
+    throw error
   }
   window.dispatchEvent(new Event('husshuss:local-data-changed'))
 }
 
 export async function restoreBackup(bundle: BackupBundle): Promise<void> {
-  const keys = [STORAGE_KEY, MEASUREMENT_STORAGE_KEY, ATHLETIC_STORAGE_KEY] as const
-  const previous = Object.fromEntries(keys.map((key) => [key, window.localStorage.getItem(key)]))
+  if (!isBackupBundle(bundle)) throw new Error('This backup is invalid or uses an unsupported format. No data has been changed.')
+  const [currentWorkouts, currentMeasurements, currentAthletic] = await Promise.all([
+    readAppData(),
+    readMeasurementData(),
+    readAthleticData(),
+  ])
+  const currentErrors = [currentWorkouts.error, currentMeasurements.error, currentAthletic.error].filter(Boolean)
+  if (currentErrors.length > 0) throw new Error(`Current data could not be secured before restore: ${currentErrors.join(' ')}`)
+  const previous = {
+    [STORAGE_KEY]: JSON.stringify(currentWorkouts.data),
+    [MEASUREMENT_STORAGE_KEY]: JSON.stringify(currentMeasurements.data),
+    [ATHLETIC_STORAGE_KEY]: JSON.stringify(currentAthletic.data),
+  }
   const recoveryPoint = JSON.stringify({
     format: 'husshuss-restore-safety',
     version: 1,
@@ -336,24 +390,10 @@ export async function restoreBackup(bundle: BackupBundle): Promise<void> {
   })
 
   window.localStorage.setItem(RESTORE_SAFETY_KEY, recoveryPoint)
-  try {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(bundle.data.workouts))
-    window.localStorage.setItem(MEASUREMENT_STORAGE_KEY, JSON.stringify(bundle.data.measurements))
-    window.localStorage.setItem(ATHLETIC_STORAGE_KEY, JSON.stringify(bundle.data.athletic))
-    await queueLocalSnapshots([
-      { category: 'workouts', snapshot: bundle.data.workouts },
-      { category: 'measurements', snapshot: bundle.data.measurements },
-      { category: 'athletic', snapshot: bundle.data.athletic },
-    ])
-  } catch (error) {
-    try {
-      for (const key of keys) restoreRawValue(key, previous[key])
-    } catch {
-      throw new Error(`Restore was interrupted and automatic rollback also failed. The original values are preserved under ${RESTORE_SAFETY_KEY}.`)
-    }
-    throw new Error(error instanceof Error
-      ? `Restore failed; the previous data was restored. ${error.message}`
-      : 'Restore failed; the previous data was restored.')
-  }
+  await queueLocalSnapshots([
+    { category: 'workouts', snapshot: bundle.data.workouts },
+    { category: 'measurements', snapshot: bundle.data.measurements },
+    { category: 'athletic', snapshot: bundle.data.athletic },
+  ])
   window.dispatchEvent(new Event('husshuss:local-data-changed'))
 }

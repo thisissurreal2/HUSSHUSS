@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react'
+import { useEffect, useState, type FormEvent } from 'react'
 import {
   athleticCategories,
   athleticUnitLabel,
@@ -230,11 +230,13 @@ function AssessmentHistory({
   definition,
   onEdit,
   onDelete,
+  saving,
 }: {
   records: AthleticRecord[]
   definition: AssessmentDefinition
   onEdit: (record: AthleticRecord) => void
   onDelete: (record: AthleticRecord) => void
+  saving: boolean
 }) {
   const metrics = definition.metrics.filter((metric) => metric.derived !== 'pace')
   const ordered = [...records].sort((a, b) => b.date.localeCompare(a.date) || b.createdAt - a.createdAt)
@@ -245,8 +247,8 @@ function AssessmentHistory({
           <div className="athletic-history-head">
             <div><span className="eyebrow">ASSESSMENT</span><h3>{formatDate(record.date)}</h3></div>
             <div className="athletic-history-actions">
-              <button type="button" onClick={() => onEdit(record)}>Edit</button>
-              <button type="button" className="athletic-delete-button" onClick={() => onDelete(record)}>Delete</button>
+              <button type="button" disabled={saving} onClick={() => onEdit(record)}>Edit</button>
+              <button type="button" className="athletic-delete-button" disabled={saving} onClick={() => onDelete(record)}>Delete</button>
             </div>
           </div>
           <dl className="athletic-result-list">
@@ -265,9 +267,15 @@ function AssessmentHistory({
 }
 
 export function AthleticDevelopment() {
-  const [loaded] = useState(readAthleticData)
-  const [athleticData, setAthleticData] = useState(loaded.data)
-  const [storageError, setStorageError] = useState<string | null>(loaded.error)
+  const [athleticData, setAthleticData] = useState<AthleticData>({
+    version: 1,
+    customAssessments: [],
+    records: [],
+  })
+  const [storageError, setStorageError] = useState<string | null>(null)
+  const [dataReady, setDataReady] = useState(false)
+  const [writeAvailable, setWriteAvailable] = useState(false)
+  const [saving, setSaving] = useState(false)
   const [view, setView] = useState<View>('overview')
   const [category, setCategory] = useState<AthleticCategoryId>('strength')
   const [assessmentId, setAssessmentId] = useState('max-push-ups')
@@ -282,6 +290,18 @@ export function AthleticDevelopment() {
   const [customUnit, setCustomUnit] = useState<CustomUnit>('reps')
   const [customDirection, setCustomDirection] = useState<PerformanceDirection>('higher')
 
+  useEffect(() => {
+    let active = true
+    void readAthleticData().then((loaded) => {
+      if (!active) return
+      setAthleticData(loaded.data)
+      setStorageError(loaded.error)
+      setWriteAvailable(loaded.usable)
+      setDataReady(true)
+    })
+    return () => { active = false }
+  }, [])
+
   const definitions = [...builtInAssessments, ...athleticData.customAssessments]
   const categoryDefinitions = definitions.filter((definition) => definition.category === category)
   const selectedAssessment = categoryDefinitions.find((definition) => definition.id === assessmentId)
@@ -292,15 +312,21 @@ export function AthleticDevelopment() {
   const chartMetrics = selectedAssessment ? getAssessmentMetrics(selectedAssessment, assessmentRecords) : []
   const metricForChart = chartMetrics.find((metric) => metric.key === selectedMetricKey) ?? chartMetrics[0]
 
-  function persist(next: AthleticData): boolean {
+  async function persist(next: AthleticData): Promise<boolean> {
+    if (!dataReady || !writeAvailable || saving) return false
+    setSaving(true)
     try {
-      writeAthleticData(next)
+      await writeAthleticData(next)
       setAthleticData(next)
       setStorageError(null)
       return true
-    } catch {
-      setStorageError('Athletic assessment data could not be saved to this browser. Check available storage and try again.')
+    } catch (error) {
+      setStorageError(error instanceof Error
+        ? `Athletic assessment data could not be saved to IndexedDB: ${error.message}`
+        : 'Athletic assessment data could not be saved to IndexedDB.')
       return false
+    } finally {
+      setSaving(false)
     }
   }
 
@@ -337,14 +363,14 @@ export function AthleticDevelopment() {
     setView('log')
   }
 
-  function deleteRecord(record: AthleticRecord) {
+  async function deleteRecord(record: AthleticRecord) {
     if (!window.confirm(`Delete the ${record.assessmentName} result from ${formatDate(record.date)}? This cannot be undone.`)) return
-    persist({ ...athleticData, records: athleticData.records.filter((item) => item.id !== record.id) })
+    await persist({ ...athleticData, records: athleticData.records.filter((item) => item.id !== record.id) })
   }
 
-  function saveRecord(event: FormEvent<HTMLFormElement>) {
+  async function saveRecord(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    if (storageError) return
+    if (!dataReady || !writeAvailable) return
     if (!isValidDate(date) || date > localDateValue()) {
       setFormError('Choose a valid date that is today or earlier.')
       return
@@ -449,7 +475,7 @@ export function AthleticDevelopment() {
         ? athleticData.records.map((record) => record.id === existing.id ? nextRecord : record)
         : [nextRecord, ...athleticData.records],
     }
-    if (persist(next)) {
+    if (await persist(next)) {
       setAssessmentId(definition.id)
       setCreatingCustom(false)
       setView('assessments')
@@ -513,6 +539,7 @@ export function AthleticDevelopment() {
         ))}
       </div>
       {storageError && <div className="athletic-alert" role="alert">{storageError}</div>}
+      {!dataReady && <p className="athletic-muted" role="status">Loading assessments…</p>}
 
       {view === 'overview' && (
         <>
@@ -612,7 +639,7 @@ export function AthleticDevelopment() {
                   <div><span className="eyebrow">SAVED RESULTS</span><h2>History</h2></div>
                   <button type="button" className="athletic-text-button" onClick={() => setView('log')}>Add result</button>
                 </div>
-                <AssessmentHistory records={displayedRecords} definition={selectedAssessment} onEdit={editRecord} onDelete={deleteRecord} />
+                <AssessmentHistory records={displayedRecords} definition={selectedAssessment} onEdit={editRecord} onDelete={deleteRecord} saving={saving} />
               </>
             )}
             {selectedAssessment && assessmentRecords.length === 0 && (
@@ -632,7 +659,7 @@ export function AthleticDevelopment() {
             <div><span className="eyebrow">{editingId ? 'EDIT RESULT' : 'OPTIONAL TEST'}</span><h2>{editingId ? 'Update assessment' : 'Log an assessment'}</h2></div>
             {editingId && <button className="athletic-text-button" type="button" onClick={resetForm}>Cancel edit</button>}
           </div>
-          <form onSubmit={saveRecord} noValidate>
+          <form onSubmit={(event) => { void saveRecord(event) }} noValidate>
             <div className="athletic-select-grid">
               <label><span>Category</span>
                 <select value={category} onChange={(event) => changeCategory(event.target.value as AthleticCategoryId)} disabled={Boolean(editingId)}>
@@ -692,7 +719,7 @@ export function AthleticDevelopment() {
             <p className="athletic-muted">You can leave any metric blank. Record assessments independently; there is no schedule or target to complete.</p>
             {formError && <div className="athletic-form-error" role="alert">{formError}</div>}
             <div className="athletic-form-actions">
-              <button type="submit" className="athletic-primary-button" disabled={Boolean(storageError)}>{editingId ? 'Save changes' : 'Save result'}</button>
+              <button type="submit" className="athletic-primary-button" disabled={!dataReady || !writeAvailable || saving}>{editingId ? 'Save changes' : 'Save result'}</button>
               {!editingId && <button type="button" className="athletic-secondary-button" onClick={resetForm}>Clear</button>}
             </div>
           </form>

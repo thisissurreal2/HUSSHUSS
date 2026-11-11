@@ -16,8 +16,15 @@ let createInstallState
 let onFirstInstallCallback
 let onExistingConnectionGet
 let onExistingConnectionPost
+let onSyncMetadataGet
+let onSyncDownloadGet
+let onSyncUploadPost
+let clientSync
+let maxRemoteBackupFileBytes
 let withConnectionTimeout
 let fetchCalls
+let remoteBackupRecord
+let successfulRemotePuts
 
 before(async () => {
   const { privateKey, publicKey } = generateKeyPairSync('rsa', { modulusLength: 2048 })
@@ -30,15 +37,24 @@ before(async () => {
     GITHUB_APP_SLUG: 'husshuss-cloud-sync',
     SESSION_SIGNING_KEY: 'a'.repeat(64),
   }
-  vite = await createServer({ server: { middlewareMode: true }, appType: 'custom' })
+  vite = await createServer({ server: { middlewareMode: true, hmr: false }, appType: 'custom' })
   const helper = await vite.ssrLoadModule('/functions/_shared/github.ts')
   const callback = await vite.ssrLoadModule('/functions/api/github/callback.ts')
   const existing = await vite.ssrLoadModule('/functions/api/github/connect-existing.ts')
+  const syncMetadata = await vite.ssrLoadModule('/functions/api/github/sync/metadata.ts')
+  const syncDownload = await vite.ssrLoadModule('/functions/api/github/sync/download.ts')
+  const syncUpload = await vite.ssrLoadModule('/functions/api/github/sync/upload.ts')
+  const syncHelper = await vite.ssrLoadModule('/functions/_shared/githubSync.ts')
   const connectionRequest = await vite.ssrLoadModule('/src/connectionRequest.ts')
+  clientSync = await vite.ssrLoadModule('/src/githubSync.ts')
   createInstallState = helper.createInstallState
   onFirstInstallCallback = callback.onRequestGet
   onExistingConnectionGet = existing.onRequestGet
   onExistingConnectionPost = existing.onRequestPost
+  onSyncMetadataGet = syncMetadata.onRequestGet
+  onSyncDownloadGet = syncDownload.onRequestGet
+  onSyncUploadPost = syncUpload.onRequestPost
+  maxRemoteBackupFileBytes = syncHelper.MAX_REMOTE_BACKUP_FILE_BYTES
   withConnectionTimeout = connectionRequest.withConnectionTimeout
 })
 
@@ -54,14 +70,47 @@ function installationResponse(overrides = {}) {
     account: { login: 'thisissurreal2' },
     repository_selection: 'selected',
     target_type: 'User',
-    permissions: { metadata: 'read' },
+    permissions: { metadata: 'read', contents: 'write' },
     ...overrides,
+  }
+}
+
+const encryptedBackupText = JSON.stringify({
+  format: 'husshuss-encrypted-backup',
+  version: 1,
+  cipher: 'AES-256-GCM',
+  kdf: 'PBKDF2-SHA-256',
+  iterations: 600_000,
+  salt: 'AAAAAAAAAAAAAAAAAAAAAA==',
+  iv: 'AAAAAAAAAAAAAAAA',
+  ciphertext: 'AAAAAAAAAAAAAAAAAAAAAAAA',
+})
+
+function remoteBackupFile(revision = 1) {
+  const content = JSON.stringify({
+    format: 'husshuss-cloud-backup',
+    version: 1,
+    revision,
+    versionId: `00000000-0000-4000-8000-${String(revision).padStart(12, '0')}`,
+    updatedAt: '2026-01-01T00:00:00.000Z',
+    encryptedBackup: encryptedBackupText,
+  })
+  return {
+    sha: 'a'.repeat(40),
+    content,
+    revision,
+    size: Buffer.byteLength(content),
   }
 }
 
 function mockGitHub({
   installation = installationResponse(),
   repositories,
+  initialRemoteBackup = null,
+  metadataSizeOverride,
+  blobSizeOverride,
+  beforePut,
+  onSuccessfulPut,
   failAt,
   failWith,
   failBody,
@@ -70,6 +119,8 @@ function mockGitHub({
   beforeRepositoryResponse,
 } = {}) {
   fetchCalls = []
+  remoteBackupRecord = initialRemoteBackup
+  successfulRemotePuts = 0
   globalThis.fetch = async (input, init = {}) => {
     const url = new URL(String(input))
     fetchCalls.push({ url, init })
@@ -109,7 +160,7 @@ function mockGitHub({
       return Response.json(installation)
     }
     if (url.pathname === `/app/installations/${installationId}/access_tokens` && init.method === 'POST') {
-      assert.deepEqual(JSON.parse(init.body), { permissions: { metadata: 'read' } })
+      assert.deepEqual(JSON.parse(init.body), { permissions: { metadata: 'read', contents: 'write' } })
       return Response.json({ token: installToken })
     }
     if (url.pathname === '/installation/repositories') {
@@ -120,6 +171,44 @@ function mockGitHub({
       })
       beforeRepositoryResponse?.()
       return response
+    }
+    if (url.pathname === `/repos/${repositoryName.toLowerCase()}/contents/husshuss/encrypted-backup-v1.json` && init.method === 'PUT') {
+      const payload = JSON.parse(init.body)
+      await beforePut?.(payload, remoteBackupRecord)
+      if ((!remoteBackupRecord && Object.hasOwn(payload, 'sha'))
+        || (remoteBackupRecord && payload.sha !== remoteBackupRecord.sha)) {
+        return Response.json({ message: 'Conflict: file SHA does not match' }, { status: 409 })
+      }
+      const sha = `${String((remoteBackupRecord?.revision ?? 0) + 1).padStart(40, '0')}`
+      const content = Buffer.from(payload.content, 'base64').toString('utf8')
+      remoteBackupRecord = {
+        sha,
+        content,
+        revision: (remoteBackupRecord?.revision ?? 0) + 1,
+        size: Buffer.byteLength(content),
+      }
+      successfulRemotePuts += 1
+      onSuccessfulPut?.(remoteBackupRecord, successfulRemotePuts)
+      return Response.json({ content: { sha, size: remoteBackupRecord.size } })
+    }
+    if (url.pathname === `/repos/${repositoryName.toLowerCase()}/contents/husshuss/encrypted-backup-v1.json`) {
+      if (!remoteBackupRecord) return Response.json({ message: 'Not Found' }, { status: 404 })
+      return Response.json({
+        type: 'file',
+        sha: remoteBackupRecord.sha,
+        size: metadataSizeOverride ?? remoteBackupRecord.size,
+      })
+    }
+    if (url.pathname.startsWith(`/repos/${repositoryName.toLowerCase()}/git/blobs/`)) {
+      if (!remoteBackupRecord || url.pathname.endsWith(remoteBackupRecord.sha) === false) {
+        return Response.json({ message: 'Not Found' }, { status: 404 })
+      }
+      return Response.json({
+        sha: remoteBackupRecord.sha,
+        size: blobSizeOverride ?? remoteBackupRecord.size,
+        encoding: 'base64',
+        content: Buffer.from(remoteBackupRecord.content).toString('base64'),
+      })
     }
     throw new Error(`Unexpected mocked GitHub request: ${url}`)
   }
@@ -159,6 +248,32 @@ async function submitExistingConnection({
     request,
     env: requestEnv,
   })
+}
+
+async function establishSessionCookie() {
+  const challenge = await beginExistingConnection()
+  const response = await submitExistingConnection(challenge)
+  assert.equal(response.status, 200)
+  const cookie = response.headers.getSetCookie().find((value) => value.startsWith('__Host-husshuss_github='))
+  assert.ok(cookie)
+  return cookie.split(';')[0]
+}
+
+function syncContext(path, method, cookie, body) {
+  const headers = { Cookie: cookie }
+  if (method === 'POST') {
+    headers.Origin = appOrigin
+    headers['Content-Type'] = 'application/json'
+    headers['Sec-Fetch-Site'] = 'same-origin'
+  }
+  return {
+    request: new Request(`${appOrigin}${path}`, {
+      method,
+      headers,
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    }),
+    env,
+  }
 }
 
 async function captureUnexpectedFailure(challenge, options = {}) {
@@ -544,8 +659,10 @@ test('GitHub connection supports first-time and already-installed flows securely
       ['wrong installation ID', { installation: installationResponse({ id: 1 }) }],
       ['wrong account', { installation: installationResponse({ account: { login: 'someone-else' } }) }],
       ['all-repository installation', { installation: installationResponse({ repository_selection: 'all' }) }],
-      ['write or extra app permission', { installation: installationResponse({ permissions: { metadata: 'write' } }) }],
-      ['extra repository permission', { installation: installationResponse({ permissions: { metadata: 'read', contents: 'read' } }) }],
+      ['missing contents permission', { installation: installationResponse({ permissions: { metadata: 'read' } }) }],
+      ['contents read-only permission', { installation: installationResponse({ permissions: { metadata: 'read', contents: 'read' } }) }],
+      ['write or extra app permission', { installation: installationResponse({ permissions: { metadata: 'write', contents: 'write' } }) }],
+      ['extra repository permission', { installation: installationResponse({ permissions: { metadata: 'read', contents: 'write', issues: 'read' } }) }],
       ['wrong repository', { repositories: { total_count: 1, repositories: [{ full_name: 'thisissurreal2/HUSSHUSS', private: true }] } }],
       ['public repository', { repositories: { total_count: 1, repositories: [{ full_name: repositoryName, private: false }] } }],
       ['multiple repositories', { repositories: { total_count: 2, repositories: [
@@ -573,5 +690,216 @@ test('GitHub connection supports first-time and already-installed flows securely
     assert.equal(response.status, 403)
     assert.equal((await response.json()).error, 'invalid_state')
     assert.equal(fetchCalls.length, 0)
+  })
+})
+
+test('GitHub encrypted backup routes preserve encryption and reject unsafe overwrites', async (context) => {
+  await context.test('metadata checks report existence without downloading backup contents', async () => {
+    mockGitHub()
+    const cookie = await establishSessionCookie()
+    fetchCalls = []
+
+    const response = await onSyncMetadataGet(syncContext('/api/github/sync/metadata', 'GET', cookie))
+    assert.equal(response.status, 200, JSON.stringify(fetchCalls.map(({ url }) => url.pathname)))
+    assert.deepEqual(await response.json(), { exists: false })
+    assert.equal(fetchCalls.some(({ url }) => url.pathname.includes('/git/blobs/')), false)
+  })
+
+  await context.test('uploads only a validated encrypted envelope and downloads it unchanged', async () => {
+    mockGitHub()
+    const cookie = await establishSessionCookie()
+    fetchCalls = []
+    const upload = await onSyncUploadPost(syncContext('/api/github/sync/upload', 'POST', cookie, {
+      backup: encryptedBackupText,
+      expectedRemote: { sha: null, revision: null, versionId: null },
+    }))
+    assert.equal(upload.status, 200)
+    const uploaded = await upload.json()
+    assert.equal(uploaded.uploaded, true)
+    assert.equal(uploaded.revision, 1)
+    assert.equal(JSON.parse(remoteBackupRecord.content).encryptedBackup, encryptedBackupText)
+    assert.equal(JSON.stringify(uploaded).includes('installToken'), false)
+
+    const updated = await onSyncUploadPost(syncContext('/api/github/sync/upload', 'POST', cookie, {
+      backup: encryptedBackupText,
+      expectedRemote: {
+        sha: uploaded.sha,
+        revision: uploaded.revision,
+        versionId: uploaded.versionId,
+      },
+    }))
+    assert.equal(updated.status, 200)
+    assert.equal((await updated.json()).revision, 2)
+
+    const metadata = await onSyncMetadataGet(syncContext('/api/github/sync/metadata', 'GET', cookie))
+    const status = await metadata.json()
+    assert.equal(status.exists, true)
+    assert.equal(status.sha, remoteBackupRecord.sha)
+
+    const download = await onSyncDownloadGet(syncContext('/api/github/sync/download', 'GET', cookie))
+    assert.equal(download.status, 200)
+    const downloaded = await download.json()
+    assert.equal(downloaded.backup, encryptedBackupText)
+    assert.equal(downloaded.remote.revision, 2)
+    assert.ok(fetchCalls.some(({ url }) => url.pathname.includes('/git/blobs/')))
+  })
+
+  await context.test('rejects plaintext and malformed encrypted payloads without writing', async (subtests) => {
+    const payloads = [
+      { backup: JSON.stringify({ workouts: ['plaintext'] }), expectedRemote: { sha: null, revision: null, versionId: null } },
+      { backup: '{"format":"husshuss-encrypted-backup"}', expectedRemote: { sha: null, revision: null, versionId: null } },
+    ]
+    for (const body of payloads) {
+      await subtests.test('invalid backup format', async () => {
+        mockGitHub()
+        const cookie = await establishSessionCookie()
+        fetchCalls = []
+        const response = await onSyncUploadPost(syncContext('/api/github/sync/upload', 'POST', cookie, body))
+        assert.equal(response.status, 400)
+        assert.equal(remoteBackupRecord, null)
+        assert.equal(fetchCalls.some(({ init }) => init.method === 'PUT'), false)
+      })
+    }
+  })
+
+  await context.test('returns a conflict instead of replacing an existing backup without its baseline', async () => {
+    mockGitHub({ initialRemoteBackup: remoteBackupFile() })
+    const cookie = await establishSessionCookie()
+    const response = await onSyncUploadPost(syncContext('/api/github/sync/upload', 'POST', cookie, {
+      backup: encryptedBackupText,
+      expectedRemote: { sha: null, revision: null, versionId: null },
+    }))
+    assert.equal(response.status, 409)
+    assert.equal((await response.json()).error, 'remote_conflict')
+    assert.equal(remoteBackupRecord.revision, 1)
+  })
+
+  await context.test('GitHub SHA preconditions allow only one concurrent upload from the same baseline', async () => {
+    let signalFirstPut
+    let signalSecondPut
+    let signalFirstWrite
+    const firstPutReached = new Promise((resolve) => { signalFirstPut = resolve })
+    const secondPutReached = new Promise((resolve) => { signalSecondPut = resolve })
+    const firstWriteCompleted = new Promise((resolve) => { signalFirstWrite = resolve })
+    let putCount = 0
+    const baseline = remoteBackupFile(1)
+    mockGitHub({
+      initialRemoteBackup: baseline,
+      beforePut: async () => {
+        putCount += 1
+        if (putCount === 1) {
+          signalFirstPut()
+          await secondPutReached
+        } else {
+          signalSecondPut()
+          await firstWriteCompleted
+        }
+      },
+      onSuccessfulPut: (_record, count) => {
+        if (count === 1) {
+          signalFirstWrite()
+        }
+      },
+    })
+    const cookie = await establishSessionCookie()
+    const expectedRemote = {
+      sha: baseline.sha,
+      revision: baseline.revision,
+      versionId: '00000000-0000-4000-8000-000000000001',
+    }
+    const firstPayload = {
+      backup: encryptedBackupText,
+      expectedRemote,
+    }
+    const secondBackup = encryptedBackupText.replace('AAAAAAAAAAAAAAAAAAAAAAAA', 'BBBBBBBBBBBBBBBBBBBBBBBB')
+    const secondPayload = { backup: secondBackup, expectedRemote }
+
+    const firstUpload = onSyncUploadPost(syncContext('/api/github/sync/upload', 'POST', cookie, firstPayload))
+    await firstPutReached
+    const secondUpload = onSyncUploadPost(syncContext('/api/github/sync/upload', 'POST', cookie, secondPayload))
+    const [firstResponse, secondResponse] = await Promise.all([firstUpload, secondUpload])
+    assert.equal(firstResponse.status, 200)
+    assert.equal(secondResponse.status, 409)
+    assert.equal((await secondResponse.json()).error, 'remote_conflict')
+    assert.equal(remoteBackupRecord.revision, 2)
+    assert.equal(JSON.parse(remoteBackupRecord.content).encryptedBackup, encryptedBackupText)
+    assert.equal(successfulRemotePuts, 1)
+  })
+
+  await context.test('rejects oversized metadata before requesting the Git blob', async () => {
+    mockGitHub({
+      initialRemoteBackup: remoteBackupFile(),
+      metadataSizeOverride: maxRemoteBackupFileBytes + 1,
+    })
+    const cookie = await establishSessionCookie()
+    fetchCalls = []
+    const response = await onSyncDownloadGet(syncContext('/api/github/sync/download', 'GET', cookie))
+    assert.equal(response.status, 502)
+    assert.equal(fetchCalls.some(({ url }) => url.pathname.includes('/git/blobs/')), false)
+  })
+
+  await context.test('rejects a Git blob whose reported byte size differs from file metadata', async () => {
+    const backup = remoteBackupFile()
+    mockGitHub({
+      initialRemoteBackup: backup,
+      blobSizeOverride: backup.size + 1,
+    })
+    const cookie = await establishSessionCookie()
+    fetchCalls = []
+    const response = await onSyncDownloadGet(syncContext('/api/github/sync/download', 'GET', cookie))
+    assert.equal(response.status, 502)
+    assert.equal(fetchCalls.some(({ url }) => url.pathname.includes('/git/blobs/')), true)
+  })
+
+  await context.test('keeps GitHub contents failures generic in the browser response', async () => {
+    mockGitHub({
+      failAt: `/repos/${repositoryName.toLowerCase()}/contents/husshuss/encrypted-backup-v1.json`,
+      failWith: 500,
+      failBody: { message: 'private repository diagnostic' },
+    })
+    const cookie = await establishSessionCookie()
+    const response = await onSyncMetadataGet(syncContext('/api/github/sync/metadata', 'GET', cookie))
+    assert.equal(response.status, 502)
+    const body = await response.text()
+    assert.equal(body.includes('private repository diagnostic'), false)
+    assert.equal(body.includes(installToken), false)
+  })
+
+  await context.test('requires a valid signed browser session', async () => {
+    mockGitHub()
+    fetchCalls = []
+    const response = await onSyncMetadataGet(syncContext('/api/github/sync/metadata', 'GET', ''))
+    assert.equal(response.status, 401)
+    assert.equal(fetchCalls.length, 0)
+  })
+
+  await context.test('browser upload sends encrypted JSON with same-origin credentials only', async () => {
+    const savedFetch = globalThis.fetch
+    let outgoing
+    globalThis.fetch = async (input, init) => {
+      outgoing = { url: String(input), init }
+      return Response.json({
+        uploaded: true,
+        backupFormatVersion: 1,
+        sha: 'b'.repeat(40),
+        size: 1024,
+        revision: 1,
+        versionId: '00000000-0000-4000-8000-000000000001',
+        updatedAt: '2026-01-01T00:00:00.000Z',
+      })
+    }
+    try {
+      await clientSync.uploadEncryptedBackup(encryptedBackupText, {
+        sha: null,
+        revision: null,
+        versionId: null,
+      })
+      assert.equal(outgoing.url, '/api/github/sync/upload')
+      assert.equal(outgoing.init.credentials, 'same-origin')
+      assert.equal(outgoing.init.headers.Authorization, undefined)
+      assert.equal(JSON.parse(outgoing.init.body).backup, encryptedBackupText)
+    } finally {
+      globalThis.fetch = savedFetch
+    }
   })
 })

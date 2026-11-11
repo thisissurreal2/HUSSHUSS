@@ -1,5 +1,5 @@
 import { getWorkout, workouts, type Exercise, type Workout, type WorkoutId } from './workouts'
-import { stageLocalSnapshot } from './localSyncQueue'
+import { readPrimarySnapshot, writePrimarySnapshot } from './localDatabase'
 
 export const STORAGE_KEY = 'husshuss.data'
 export const DATA_VERSION = 2
@@ -361,43 +361,23 @@ function migrateLegacyData(legacy: LegacyAppData): AppData {
   }
 }
 
-export function readAppData(): { data: AppData; error: string | null } {
-  try {
-    const raw = window.localStorage.getItem(STORAGE_KEY)
-    if (raw === null) {
-      return { data: createInitialData(), error: null }
-    }
-    const parsed: unknown = JSON.parse(raw)
-    if (!isAppData(parsed)) {
-      if (isLegacyAppData(parsed)) {
-        const migrated = migrateLegacyData(parsed)
-        try {
-          writeAppData(migrated)
-          return { data: migrated, error: null }
-        } catch {
-          return {
-            data: migrated,
-            error: 'Your previous workout data was loaded, but the updated format could not be saved. Check browser storage availability.',
-          }
-        }
-      }
-      return {
-        data: createInitialData(),
-        error: 'Saved workout data is invalid or from an unsupported version. Start fresh or clear this browser’s HUSSHUSS storage.',
-      }
-    }
-    return { data: parsed, error: null }
-  } catch {
-    return {
-      data: createInitialData(),
-      error: 'Saved workout data could not be read. Browser storage may be unavailable or corrupted.',
-    }
-  }
+export function normalizeAppData(value: unknown): AppData | null {
+  if (isAppData(value)) return value
+  return isLegacyAppData(value) ? migrateLegacyData(value) : null
 }
 
-export function writeAppData(data: AppData): void {
-  window.localStorage.setItem(STORAGE_KEY, JSON.stringify(data))
-  stageLocalSnapshot('workouts', data)
+export function readAppData(): Promise<{ data: AppData; error: string | null; usable: boolean }> {
+  return readPrimarySnapshot(
+    'workouts',
+    STORAGE_KEY,
+    isAppData,
+    normalizeAppData,
+    createInitialData(),
+  )
+}
+
+export function writeAppData(data: AppData): Promise<void> {
+  return writePrimarySnapshot('workouts', data, isAppData)
 }
 
 function parseWeight(value: string): number | null {

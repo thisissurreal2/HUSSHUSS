@@ -1,4 +1,4 @@
-import { stageLocalSnapshot } from './localSyncQueue'
+import { readPrimarySnapshot, writePrimarySnapshot } from './localDatabase'
 
 export const MEASUREMENT_STORAGE_KEY = 'husshuss.measurements'
 export const MEASUREMENT_DATA_VERSION = 1
@@ -87,34 +87,18 @@ export function isMeasurementData(value: unknown): value is MeasurementData {
   return new Set(ids).size === ids.length && new Set(dates).size === dates.length
 }
 
-export function readMeasurementData(): { data: MeasurementData; error: string | null } {
-  try {
-    const raw = window.localStorage.getItem(MEASUREMENT_STORAGE_KEY)
-    if (raw === null) {
-      return {
-        data: { version: MEASUREMENT_DATA_VERSION, sessions: [] },
-        error: null,
-      }
-    }
-    const parsed: unknown = JSON.parse(raw)
-    if (!isMeasurementData(parsed)) {
-      return {
-        data: { version: MEASUREMENT_DATA_VERSION, sessions: [] },
-        error: 'Saved measurement data is invalid or from an unsupported version. It has not been overwritten.',
-      }
-    }
-    return { data: parsed, error: null }
-  } catch {
-    return {
-      data: { version: MEASUREMENT_DATA_VERSION, sessions: [] },
-      error: 'Saved measurement data could not be read. Browser storage may be unavailable or corrupted.',
-    }
-  }
+export function readMeasurementData(): Promise<{ data: MeasurementData; error: string | null; usable: boolean }> {
+  return readPrimarySnapshot(
+    'measurements',
+    MEASUREMENT_STORAGE_KEY,
+    isMeasurementData,
+    (value) => isMeasurementData(value) ? value : null,
+    { version: MEASUREMENT_DATA_VERSION, sessions: [] },
+  )
 }
 
-export function writeMeasurementData(data: MeasurementData): void {
-  window.localStorage.setItem(MEASUREMENT_STORAGE_KEY, JSON.stringify(data))
-  stageLocalSnapshot('measurements', data)
+export function writeMeasurementData(data: MeasurementData): Promise<void> {
+  return writePrimarySnapshot('measurements', data, isMeasurementData)
 }
 
 export function createMeasurementId(): string {

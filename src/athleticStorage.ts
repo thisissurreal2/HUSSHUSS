@@ -1,4 +1,4 @@
-import { stageLocalSnapshot } from './localSyncQueue'
+import { readPrimarySnapshot, writePrimarySnapshot } from './localDatabase'
 
 export const ATHLETIC_STORAGE_KEY = 'husshuss.athletic'
 export const ATHLETIC_DATA_VERSION = 1
@@ -192,30 +192,18 @@ export function isAthleticData(value: unknown): value is AthleticData {
   })
 }
 
-export function readAthleticData(): { data: AthleticData; error: string | null } {
-  try {
-    const raw = window.localStorage.getItem(ATHLETIC_STORAGE_KEY)
-    if (raw === null) return { data: { version: ATHLETIC_DATA_VERSION, customAssessments: [], records: [] }, error: null }
-    const parsed: unknown = JSON.parse(raw)
-    if (!isAthleticData(parsed)) {
-      return {
-        data: { version: ATHLETIC_DATA_VERSION, customAssessments: [], records: [] },
-        error: 'Saved athletic assessment data is invalid or from an unsupported version. It has not been overwritten.',
-      }
-    }
-    return { data: parsed, error: null }
-  } catch {
-    return {
-      data: { version: ATHLETIC_DATA_VERSION, customAssessments: [], records: [] },
-      error: 'Athletic assessment data could not be read. Browser storage may be unavailable or corrupted.',
-    }
-  }
+export function readAthleticData(): Promise<{ data: AthleticData; error: string | null; usable: boolean }> {
+  return readPrimarySnapshot(
+    'athletic',
+    ATHLETIC_STORAGE_KEY,
+    isAthleticData,
+    (value) => isAthleticData(value) ? value : null,
+    { version: ATHLETIC_DATA_VERSION, customAssessments: [], records: [] },
+  )
 }
 
-export function writeAthleticData(data: AthleticData): void {
-  window.localStorage.setItem(ATHLETIC_STORAGE_KEY, JSON.stringify(data))
-  stageLocalSnapshot('athletic', data)
-  window.dispatchEvent(new Event('husshuss:local-data-changed'))
+export function writeAthleticData(data: AthleticData): Promise<void> {
+  return writePrimarySnapshot('athletic', data, isAthleticData)
 }
 
 export function createAthleticId(): string {

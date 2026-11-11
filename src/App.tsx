@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { HistoryPage, WorkoutSession, type RestTimerProps } from './WorkoutFeatures'
 import { PerformanceDashboard } from './PerformanceDashboard'
 import { StrengthProgressPage } from './StrengthProgress'
@@ -6,13 +6,12 @@ import { BodyMeasurements } from './BodyMeasurements'
 import { AthleticDevelopment } from './AthleticDevelopment'
 import { PersonalInsights } from './PersonalInsights'
 import { BackupRecovery } from './BackupRecovery'
-import { initializeLocalQueue } from './localSyncQueue'
-import { isMeasurementData } from './measurementStorage'
-import { isAthleticData } from './athleticStorage'
+import { readMeasurementData } from './measurementStorage'
+import { readAthleticData } from './athleticStorage'
 import {
   createActiveWorkout,
   createWorkoutRecord,
-  isAppData,
+  createInitialData,
   readAppData,
   writeAppData,
   type ActiveWorkout,
@@ -96,10 +95,11 @@ function BrandMark() {
 function App() {
   const [activeTab, setActiveTab] = useState<Tab>('overview')
   const [progressView, setProgressView] = useState<ProgressView>('dashboard')
-  const [loadedData] = useState(readAppData)
-  const [data, setData] = useState<AppData>(loadedData.data)
+  const [data, setData] = useState<AppData>(createInitialData)
   const dataRef = useRef(data)
-  const [storageError, setStorageError] = useState<string | null>(loadedData.error)
+  const [storageError, setStorageError] = useState<string | null>(null)
+  const [dataReady, setDataReady] = useState(false)
+  const [workoutWriteAvailable, setWorkoutWriteAvailable] = useState(false)
   const [timerNotice, setTimerNotice] = useState<string | null>(null)
   const [notificationPermission, setNotificationPermission] = useState<NotificationPermission | 'unsupported'>(
     typeof Notification === 'undefined' ? 'unsupported' : Notification.permission,
@@ -123,44 +123,44 @@ function App() {
 
   useEffect(() => {
     let active = true
-    const handleLocalStorageError = (event: Event) => {
-      const detail = event instanceof CustomEvent && typeof event.detail === 'string'
-        ? event.detail
-        : 'The local IndexedDB queue could not be updated.'
-      setStorageError(`Workout data remains in browser storage, but the offline sync queue could not be updated: ${detail}`)
-    }
-    window.addEventListener('husshuss:local-storage-error', handleLocalStorageError)
-    void initializeLocalQueue((category, snapshot) => (
-      category === 'workouts'
-        ? isAppData(snapshot)
-        : category === 'measurements'
-          ? isMeasurementData(snapshot)
-          : isAthleticData(snapshot)
-    )).catch((error: unknown) => {
-      if (active) {
-        setStorageError(`Workout data remains in browser storage, but IndexedDB could not be initialized: ${error instanceof Error ? error.message : 'unknown error'}`)
-      }
-    })
-    return () => {
-      active = false
-      window.removeEventListener('husshuss:local-storage-error', handleLocalStorageError)
-    }
+    void Promise.all([readAppData(), readMeasurementData(), readAthleticData()])
+      .then(([workoutsResult, measurementsResult, athleticResult]) => {
+        if (!active) return
+        dataRef.current = workoutsResult.data
+        setData(workoutsResult.data)
+        setWorkoutWriteAvailable(workoutsResult.usable)
+        const errors = [
+          workoutsResult.error,
+          measurementsResult.error,
+          athleticResult.error,
+        ].filter((error): error is string => error !== null)
+        setStorageError(errors.length > 0 ? errors.join(' ') : null)
+        setDataReady(true)
+      })
+      .catch((error: unknown) => {
+        if (active) {
+          setStorageError(`Local IndexedDB could not be initialized: ${error instanceof Error ? error.message : 'unknown error'}`)
+          setWorkoutWriteAvailable(false)
+          setDataReady(true)
+        }
+      })
+    return () => { active = false }
   }, [])
 
-  function updateData(change: (current: AppData) => AppData) {
+  const updateData = useCallback((change: (current: AppData) => AppData) => {
+    if (!dataReady || !workoutWriteAvailable) return
     const current = dataRef.current
     const next = change(current)
     if (next === current) return
 
     dataRef.current = next
     setData(next)
-    try {
-      writeAppData(next)
-      setStorageError(null)
-    } catch {
-      setStorageError('Your changes are only in memory because this browser could not save local data.')
-    }
-  }
+    void writeAppData(next)
+      .then(() => setStorageError((error) => error?.startsWith('Workout data could not be saved') ? null : error))
+      .catch((error: unknown) => {
+        setStorageError(`Workout data could not be saved to IndexedDB: ${error instanceof Error ? error.message : 'unknown error'}`)
+      })
+  }, [dataReady, workoutWriteAvailable])
 
   function startWorkout() {
     const current = dataRef.current
@@ -359,7 +359,7 @@ function App() {
     updateRemaining()
     const intervalId = window.setInterval(updateRemaining, 250)
     return () => window.clearInterval(intervalId)
-  }, [data.timerDeadline, data.timerRunning])
+  }, [data.timerDeadline, data.timerRunning, updateData])
 
   function deleteHistoryRecord(recordId: string) {
     updateData((current) => ({
@@ -370,6 +370,14 @@ function App() {
 
   function goToTab(tab: Tab) {
     setActiveTab(tab)
+  }
+
+  if (!dataReady) {
+    return (
+      <div className="app-shell min-h-screen">
+        <main className="main-content" role="status">Opening your local HUSSHUSS database…</main>
+      </div>
+    )
   }
 
   return (

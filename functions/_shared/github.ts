@@ -48,7 +48,29 @@ const SESSION_TTL_SECONDS = 10 * 60
 const textEncoder = new TextEncoder()
 const textDecoder = new TextDecoder()
 
-type GitHubApiStage = 'installation_lookup' | 'installation_token_creation' | 'repository_listing'
+type GitHubApiStage =
+  | 'installation_lookup'
+  | 'installation_token_creation'
+  | 'repository_listing'
+  | 'backup_metadata'
+  | 'backup_blob'
+  | 'backup_upload'
+
+export type GitHubRepositoryAccess = {
+  installation: VerifiedInstallation
+  accessToken: string
+}
+
+export type GitHubBackupFileMetadata = {
+  sha: string
+  size: number
+}
+
+export type GitHubBackupBlob = {
+  sha: string
+  size: number
+  content: string
+}
 
 export type GitHubApiDiagnostic = {
   stage: GitHubApiStage
@@ -305,14 +327,17 @@ async function githubJson<T>(
   method = 'GET',
   body?: unknown,
   sensitiveValues: string[] = [],
+  accept = 'application/vnd.github+json',
+  maxResponseBytes = 2 * 1024 * 1024,
+  timeoutMs = 12_000,
 ): Promise<T> {
   const controller = new AbortController()
-  const timeout = setTimeout(() => controller.abort(), 12_000)
+  const timeout = setTimeout(() => controller.abort(), timeoutMs)
   try {
     const response = await fetch(url, {
       method,
       headers: {
-        Accept: 'application/vnd.github+json',
+        Accept: accept,
         Authorization: `Bearer ${token}`,
         'User-Agent': 'husshuss-cloud-sync',
         'X-GitHub-Api-Version': API_VERSION,
@@ -324,9 +349,28 @@ async function githubJson<T>(
     if (!response.ok) {
       throw new GitHubApiError(await githubErrorDiagnostic(response, stage, token, sensitiveValues))
     }
+    const declaredLength = Number(response.headers.get('Content-Length') ?? 0)
+    if (Number.isFinite(declaredLength) && declaredLength > maxResponseBytes) {
+      throw new GitHubApiError({
+        stage,
+        status: response.status,
+        code: 'RESPONSE_TOO_LARGE',
+        message: 'GitHub response exceeds the supported size.',
+      })
+    }
     try {
-      return await response.json() as T
-    } catch {
+      const text = await response.text()
+      if (new TextEncoder().encode(text).byteLength > maxResponseBytes) {
+        throw new GitHubApiError({
+          stage,
+          status: response.status,
+          code: 'RESPONSE_TOO_LARGE',
+          message: 'GitHub response exceeds the supported size.',
+        })
+      }
+      return JSON.parse(text) as T
+    } catch (error) {
+      if (error instanceof GitHubApiError) throw error
       throw new GitHubApiError({
         stage,
         status: response.status,
@@ -350,10 +394,10 @@ async function githubJson<T>(
   }
 }
 
-export async function verifyInstallation(
+async function verifyInstallationAndAccess(
   env: GitHubConnectionEnv,
   installationId: string,
-): Promise<VerifiedInstallation> {
+): Promise<GitHubRepositoryAccess> {
   const config = requireConfiguration(env)
   if (!/^\d{1,20}$/.test(installationId)) throw new Error('Invalid installation.')
 
@@ -373,8 +417,9 @@ export async function verifyInstallation(
     || !installation.account || typeof installation.account.login !== 'string'
     || installation.account.login.toLowerCase() !== config.repository.split('/')[0]
     || !isObject(installation.permissions)
-    || Object.keys(installation.permissions).length !== 1
-    || installation.permissions.metadata !== 'read') {
+    || Object.keys(installation.permissions).length !== 2
+    || installation.permissions.metadata !== 'read'
+    || installation.permissions.contents !== 'write') {
     throw new GitHubInstallationRejectedError()
   }
 
@@ -383,7 +428,7 @@ export async function verifyInstallation(
     appJwt,
     'installation_token_creation',
     'POST',
-    { permissions: { metadata: 'read' } },
+    { permissions: { metadata: 'read', contents: 'write' } },
     [installationId],
   )
   if (!isObject(accessToken) || typeof accessToken.token !== 'string' || accessToken.token.length < 20) {
@@ -409,10 +454,121 @@ export async function verifyInstallation(
   }
 
   return {
-    installationId,
-    account: installation.account.login,
-    repository: repository.full_name,
+    installation: {
+      installationId,
+      account: installation.account.login,
+      repository: repository.full_name,
+    },
+    accessToken: accessToken.token,
   }
+}
+
+export async function verifyInstallation(
+  env: GitHubConnectionEnv,
+  installationId: string,
+): Promise<VerifiedInstallation> {
+  return (await verifyInstallationAndAccess(env, installationId)).installation
+}
+
+export async function getVerifiedRepositoryAccess(
+  env: GitHubConnectionEnv,
+  installationId: string,
+): Promise<GitHubRepositoryAccess> {
+  return verifyInstallationAndAccess(env, installationId)
+}
+
+const REMOTE_BACKUP_PATH = 'husshuss/encrypted-backup-v1.json'
+
+export async function getRemoteBackupFileMetadata(
+  env: GitHubConnectionEnv,
+  accessToken: string,
+): Promise<GitHubBackupFileMetadata | null> {
+  const config = requireConfiguration(env)
+  try {
+    const file = await githubJson<{ sha: string; size: number; type: string }>(
+      `https://api.github.com/repos/${config.repository}/contents/${REMOTE_BACKUP_PATH}`,
+      accessToken,
+      'backup_metadata',
+    )
+    if (file.type !== 'file' || !/^[0-9a-f]{40}$/i.test(file.sha)
+      || !Number.isSafeInteger(file.size) || file.size < 0) {
+      throw new GitHubInstallationRejectedError()
+    }
+    return { sha: file.sha, size: file.size }
+  } catch (error) {
+    if (error instanceof GitHubApiError && error.diagnostic.status === 404) return null
+    throw error
+  }
+}
+
+export async function getRemoteBackupBlob(
+  env: GitHubConnectionEnv,
+  accessToken: string,
+  sha: string,
+  expectedSize: number,
+  maxSize: number,
+): Promise<GitHubBackupBlob> {
+  const config = requireConfiguration(env)
+  if (!/^[0-9a-f]{40}$/i.test(sha)
+    || !Number.isSafeInteger(expectedSize) || expectedSize < 0 || expectedSize > maxSize) {
+    throw new GitHubInstallationRejectedError()
+  }
+  const blob = await githubJson<{ sha: string; size: number; encoding: string; content: string }>(
+    `https://api.github.com/repos/${config.repository}/git/blobs/${sha}`,
+    accessToken,
+    'backup_blob',
+    'GET',
+    undefined,
+    [],
+    'application/vnd.github+json',
+    100 * 1024 * 1024,
+    30_000,
+  )
+  if (blob.sha !== sha || blob.encoding !== 'base64' || typeof blob.content !== 'string'
+    || !Number.isSafeInteger(blob.size) || blob.size !== expectedSize || blob.size > maxSize) {
+    throw new GitHubInstallationRejectedError()
+  }
+  const normalizedContent = blob.content.replace(/\s/g, '')
+  const padding = normalizedContent.endsWith('==') ? 2 : normalizedContent.endsWith('=') ? 1 : 0
+  const decodedSize = normalizedContent.length / 4 * 3 - padding
+  if (!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(normalizedContent)
+    || normalizedContent.length !== Math.ceil(blob.size / 3) * 4
+    || decodedSize !== blob.size) {
+    throw new GitHubInstallationRejectedError()
+  }
+  return { sha: blob.sha, size: blob.size, content: normalizedContent }
+}
+
+export async function putRemoteBackupFile(
+  env: GitHubConnectionEnv,
+  accessToken: string,
+  content: string,
+  sha?: string,
+): Promise<GitHubBackupFileMetadata> {
+  const config = requireConfiguration(env)
+  const result = await githubJson<{
+    content?: { sha?: string; size?: number }
+  }>(
+    `https://api.github.com/repos/${config.repository}/contents/${REMOTE_BACKUP_PATH}`,
+    accessToken,
+    'backup_upload',
+    'PUT',
+    {
+      message: 'Update encrypted HUSSHUSS backup',
+      content,
+      ...(sha ? { sha } : {}),
+    },
+    [],
+    undefined,
+    2 * 1024 * 1024,
+    30_000,
+  )
+  const file = result.content
+  if (!file || typeof file.sha !== 'string' || !/^[0-9a-f]{40}$/i.test(file.sha)
+    || !Number.isSafeInteger(file.size) || (file.size ?? -1) < 0) {
+    throw new GitHubInstallationRejectedError()
+  }
+  return { sha: file.sha, size: file.size as number }
 }
 
 type ConnectionSession = VerifiedInstallation & {
@@ -532,4 +688,3 @@ export function jsonResponse(body: unknown, status = 200, extraHeaders?: Headers
     },
   })
 }
-

@@ -1,5 +1,7 @@
 # Phase 4.2: secure GitHub connection foundation
 
+> **Current implementation note:** This document records the Phase 4.2 connection-only design. Phase 4.3 supersedes its Metadata-only permission and “no contents transfer” limitations by adding encrypted backup transfer. The current App permission must be exactly Metadata read plus Contents read/write and the installation must remain restricted to `thisissurreal2/HUSSHUSS-data`. See [Phase 4.3 encrypted backup sync](./phase-4.3-encrypted-backup-sync.md) for the current data-transfer design and limits.
+
 ## What this phase does
 
 The app has same-origin Cloudflare Pages Functions for starting a GitHub App installation, validating its callback, checking connection status, and clearing the local connection cookie. The Backup & sync screen reports **connected** only after the backend has re-verified the installed GitHub App and the exact private repository.
@@ -68,10 +70,10 @@ Cloudflare secret values must be configured separately for each environment. Use
 The Pages Function code does **not** implement a shared rate limiter. An in-memory counter would be unreliable across Worker isolates and Cloudflare locations. Before public deployment, configure a Cloudflare WAF rate-limiting rule on the proxied custom domain that serves the Pages app:
 
 1. In Cloudflare, open the zone for the app's custom hostname, then **Security → Security rules → Create rule → Rate limiting rules**.
-2. Match these three paths with this expression:
+2. Match the connection and sync routes with this expression:
 
    ```text
-   (http.request.uri.path eq "/api/github/connect" or http.request.uri.path eq "/api/github/callback" or http.request.uri.path eq "/api/github/status")
+   (http.request.uri.path eq "/api/github/connect" or http.request.uri.path eq "/api/github/callback" or http.request.uri.path eq "/api/github/status" or http.request.uri.path eq "/api/github/sync/metadata" or http.request.uri.path eq "/api/github/sync/download" or http.request.uri.path eq "/api/github/sync/upload")
    ```
 
 3. Use **IP** as the counting characteristic (the Free plan's available characteristic).

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
-import { readAthleticData, athleticCategories, builtInAssessments } from './athleticStorage'
-import { readMeasurementData } from './measurementStorage'
+import { readAthleticData, athleticCategories, builtInAssessments, type AthleticData } from './athleticStorage'
+import { readMeasurementData, type MeasurementData } from './measurementStorage'
 import { getExercisePerformances, getPersonalRecords } from './strengthAnalytics'
 import type { WorkoutRecord } from './workoutStorage'
 
@@ -38,30 +38,38 @@ function formatDate(timestamp: number): string {
   return new Intl.DateTimeFormat('en', { month: 'short', day: 'numeric', year: 'numeric' }).format(new Date(timestamp))
 }
 
-function readAthleticSnapshot() {
-  return readAthleticData().data
-}
-
-function readMeasurementSnapshot() {
-  return readMeasurementData().data
-}
-
 export function PersonalInsights({ history }: { history: WorkoutRecord[] }) {
   const [period, setPeriod] = useState<Period>('30d')
-  const [athletic, setAthletic] = useState(readAthleticSnapshot)
-  const [measurements, setMeasurements] = useState(readMeasurementSnapshot)
+  const [athletic, setAthletic] = useState<AthleticData>(() => ({
+    version: 1,
+    customAssessments: [],
+    records: [],
+  }))
+  const [measurements, setMeasurements] = useState<MeasurementData>(() => ({ version: 1, sessions: [] }))
+  const [storageError, setStorageError] = useState<string | null>(null)
   const [now] = useState(() => Date.now())
 
   useEffect(() => {
+    let active = true
     const refresh = () => {
-      setAthletic(readAthleticSnapshot())
-      setMeasurements(readMeasurementSnapshot())
+      void Promise.all([readAthleticData(), readMeasurementData()])
+        .then(([athleticResult, measurementResult]) => {
+          if (!active) return
+          setAthletic(athleticResult.data)
+          setMeasurements(measurementResult.data)
+          setStorageError(athleticResult.error || measurementResult.error)
+        })
+        .catch((error: unknown) => {
+          if (active) {
+            setStorageError(error instanceof Error ? error.message : 'Local progress data could not be read.')
+          }
+        })
     }
+    refresh()
     window.addEventListener('husshuss:local-data-changed', refresh)
-    window.addEventListener('storage', refresh)
     return () => {
+      active = false
       window.removeEventListener('husshuss:local-data-changed', refresh)
-      window.removeEventListener('storage', refresh)
     }
   }, [])
 
@@ -175,6 +183,7 @@ export function PersonalInsights({ history }: { history: WorkoutRecord[] }) {
 
   return (
     <div className="personal-insights">
+      {storageError && <div className="athletic-alert" role="alert">{storageError}</div>}
       <div className="page-heading">
         <div>
           <div className="eyebrow">YOUR PROGRESS · PHASE 3.5</div>

@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react'
+import { useEffect, useState, type FormEvent } from 'react'
 import {
   createEmptyMeasurementValues,
   createMeasurementId,
@@ -248,9 +248,11 @@ function MeasurementComparison({
 }
 
 export function BodyMeasurements() {
-  const [loaded] = useState(readMeasurementData)
-  const [sessions, setSessions] = useState(loaded.data.sessions)
-  const [storageError, setStorageError] = useState<string | null>(loaded.error)
+  const [sessions, setSessions] = useState<MeasurementSession[]>([])
+  const [storageError, setStorageError] = useState<string | null>(null)
+  const [dataReady, setDataReady] = useState(false)
+  const [writeAvailable, setWriteAvailable] = useState(false)
+  const [saving, setSaving] = useState(false)
   const [view, setView] = useState<MeasurementView>('log')
   const [formValues, setFormValues] = useState<Record<MeasurementKey, string>>(() => (
     toFormValues(createEmptyMeasurementValues())
@@ -261,6 +263,18 @@ export function BodyMeasurements() {
   const [selectedMetric, setSelectedMetric] = useState<MeasurementKey>('waistCm')
   const [range, setRange] = useState<DateRange>('1y')
 
+  useEffect(() => {
+    let active = true
+    void readMeasurementData().then((loaded) => {
+      if (!active) return
+      setSessions(loaded.data.sessions)
+      setStorageError(loaded.error)
+      setWriteAvailable(loaded.usable)
+      setDataReady(true)
+    })
+    return () => { active = false }
+  }, [])
+
   const sortedSessions = [...sessions].sort((a, b) => b.date.localeCompare(a.date))
   const selectedField = fields.find((field) => field.key === selectedMetric) ?? fields[0]
   const chartValues = [...sessions]
@@ -270,16 +284,22 @@ export function BodyMeasurements() {
       return value === null ? [] : [{ date: session.date, value }]
     })
 
-  function persist(next: MeasurementSession[]): boolean {
+  async function persist(next: MeasurementSession[]): Promise<boolean> {
+    if (!dataReady || !writeAvailable || saving) return false
     const nextData: MeasurementData = { version: 1, sessions: next }
+    setSaving(true)
     try {
-      writeMeasurementData(nextData)
+      await writeMeasurementData(nextData)
       setSessions(next)
       setStorageError(null)
       return true
-    } catch {
-      setStorageError('Measurements could not be saved to this browser. Check available storage and try again.')
+    } catch (error) {
+      setStorageError(error instanceof Error
+        ? `Measurements could not be saved to IndexedDB: ${error.message}`
+        : 'Measurements could not be saved to IndexedDB.')
       return false
+    } finally {
+      setSaving(false)
     }
   }
 
@@ -290,9 +310,9 @@ export function BodyMeasurements() {
     setFormError(null)
   }
 
-  function saveSession(event: FormEvent<HTMLFormElement>) {
+  async function saveSession(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    if (storageError) return
+    if (!dataReady || !writeAvailable) return
     if (!isValidDate(date) || date > localDateValue()) {
       setFormError('Choose a valid date that is today or earlier.')
       return
@@ -319,7 +339,7 @@ export function BodyMeasurements() {
     const next = editing
       ? sessions.map((session) => session.id === editing.id ? nextSession : session)
       : [nextSession, ...sessions]
-    if (persist(next)) resetForm()
+    if (await persist(next)) resetForm()
   }
 
   function editSession(session: MeasurementSession) {
@@ -331,9 +351,9 @@ export function BodyMeasurements() {
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
 
-  function deleteSession(session: MeasurementSession) {
+  async function deleteSession(session: MeasurementSession) {
     if (!window.confirm(`Delete the measurement entry from ${formatDate(session.date)}? This cannot be undone.`)) return
-    persist(sessions.filter((item) => item.id !== session.id))
+    await persist(sessions.filter((item) => item.id !== session.id))
   }
 
   return (
@@ -359,6 +379,7 @@ export function BodyMeasurements() {
       </div>
 
       {storageError && <div className="measurement-alert" role="alert">{storageError}</div>}
+      {!dataReady && <p className="measurement-muted" role="status">Loading measurements…</p>}
 
       {view === 'log' && (
         <section className="measurement-panel">
@@ -366,7 +387,7 @@ export function BodyMeasurements() {
             <div><span className="eyebrow">{editingId ? 'UPDATE ENTRY' : 'NEW ENTRY'}</span><h2>{editingId ? 'Edit measurements' : 'Measurement session'}</h2></div>
             {editingId && <button className="measurement-secondary-button" type="button" onClick={resetForm}>Cancel edit</button>}
           </div>
-          <form onSubmit={saveSession} noValidate>
+          <form onSubmit={(event) => { void saveSession(event) }} noValidate>
             <label className="measurement-date-field">
               <span>Measurement date</span>
               <input type="date" value={date} max={localDateValue()} onChange={(event) => setDate(event.target.value)} required />
@@ -402,7 +423,7 @@ export function BodyMeasurements() {
             <p className="measurement-muted">All fields are optional. Leave a field blank if you did not measure it. Circumferences use centimetres; body weight uses kilograms.</p>
             {formError && <div className="measurement-form-error" role="alert">{formError}</div>}
             <div className="measurement-form-actions">
-              <button className="measurement-primary-button" type="submit" disabled={Boolean(storageError)}>
+              <button className="measurement-primary-button" type="submit" disabled={!dataReady || !writeAvailable || saving}>
                 {editingId ? 'Save changes' : 'Save measurement session'}
               </button>
               {!editingId && <button className="measurement-secondary-button" type="button" onClick={resetForm}>Clear</button>}
@@ -428,7 +449,7 @@ export function BodyMeasurements() {
                       <div><span className="eyebrow">MEASUREMENT SESSION</span><h3>{formatDate(session.date)}</h3></div>
                       <div className="measurement-history-actions">
                         <button type="button" onClick={() => editSession(session)}>Edit</button>
-                        <button type="button" className="measurement-delete-button" onClick={() => deleteSession(session)}>Delete</button>
+                        <button type="button" className="measurement-delete-button" disabled={saving} onClick={() => { void deleteSession(session) }}>Delete</button>
                       </div>
                     </div>
                     <dl className="measurement-values-list">
