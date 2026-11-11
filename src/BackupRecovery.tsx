@@ -28,6 +28,43 @@ function formatBytes(bytes: number): string {
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`
 }
 
+type GitHubConnectionStatus =
+  | { kind: 'checking' }
+  | { kind: 'not-configured' }
+  | { kind: 'not-connected' }
+  | { kind: 'connected'; verifiedAt: string }
+  | { kind: 'verification-unavailable' }
+  | { kind: 'unavailable' }
+
+async function requestGitHubStatus(): Promise<GitHubConnectionStatus> {
+  const response = await fetch('/api/github/status', { cache: 'no-store', credentials: 'same-origin' })
+  if (response.status === 503) {
+    const value: unknown = await response.json().catch(() => null)
+    if (typeof value === 'object' && value !== null && !Array.isArray(value)
+      && 'configured' in value && value.configured === true
+      && 'error' in value && value.error === 'verification_unavailable') {
+      return { kind: 'verification-unavailable' }
+    }
+  }
+  if (!response.ok) throw new Error('Connection status is unavailable.')
+  const value: unknown = await response.json()
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    throw new Error('Invalid connection status.')
+  }
+  const status = value as Record<string, unknown>
+  if (status.configured === false && status.connected === false) return { kind: 'not-configured' }
+  if (status.configured === true && status.connected === false) return { kind: 'not-connected' }
+  if (status.configured === true && status.connected === true && status.verified === true
+    && status.account === 'thisissurreal2'
+    && status.repository === 'thisissurreal2/HUSSHUSS-data'
+    && status.visibility === 'private'
+    && typeof status.verifiedAt === 'string'
+    && Number.isFinite(Date.parse(status.verifiedAt))) {
+    return { kind: 'connected', verifiedAt: status.verifiedAt }
+  }
+  throw new Error('Invalid connection status.')
+}
+
 export function BackupRecovery({ onRestored }: { onRestored: () => void }) {
   const fileInput = useRef<HTMLInputElement>(null)
   const [exportPassphrase, setExportPassphrase] = useState('')
@@ -36,6 +73,14 @@ export function BackupRecovery({ onRestored }: { onRestored: () => void }) {
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
   const [validatedBundle, setValidatedBundle] = useState<BackupBundle | null>(null)
   const [pendingCount, setPendingCount] = useState<number | null>(null)
+  const [githubStatus, setGithubStatus] = useState<GitHubConnectionStatus>({ kind: 'checking' })
+  const [connectionBusy, setConnectionBusy] = useState(false)
+  const [connectionMessage, setConnectionMessage] = useState<string | null>(() => {
+    if (typeof window === 'undefined') return null
+    return new URLSearchParams(window.location.search).get('github_connection') === 'failed'
+      ? 'GitHub could not verify the selected private repository. No fitness data was sent.'
+      : null
+  })
   const [restoreSafetyDate] = useState(getRestoreSafetyDate)
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
@@ -57,6 +102,56 @@ export function BackupRecovery({ onRestored }: { onRestored: () => void }) {
       window.removeEventListener('husshuss:local-queue-updated', refresh)
     }
   }, [])
+
+  useEffect(() => {
+    let active = true
+    const result = new URLSearchParams(window.location.search).get('github_connection')
+    if (result === 'failed' || result === 'complete') {
+      window.history.replaceState(null, '', `${window.location.pathname}${window.location.hash}`)
+    }
+
+    async function refreshConnection() {
+      try {
+        const status = await requestGitHubStatus()
+        if (active) setGithubStatus(status)
+      } catch {
+        if (active) setGithubStatus({ kind: 'unavailable' })
+      }
+    }
+
+    void refreshConnection()
+    return () => { active = false }
+  }, [])
+
+  async function refreshGitHubStatus() {
+    setGithubStatus({ kind: 'checking' })
+    try {
+      setGithubStatus(await requestGitHubStatus())
+    } catch {
+      setGithubStatus({ kind: 'unavailable' })
+    }
+  }
+
+  async function disconnectGitHub() {
+    if (!window.confirm('Disconnect this device from the verified GitHub connection? This does not revoke the GitHub App installation.')) return
+    setConnectionBusy(true)
+    setConnectionMessage(null)
+    try {
+      const response = await fetch('/api/github/disconnect', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: '{}',
+      })
+      if (!response.ok) throw new Error('Could not disconnect this device.')
+      setConnectionMessage('This device is disconnected. The GitHub App installation was not revoked.')
+      await refreshGitHubStatus()
+    } catch {
+      setConnectionMessage('Could not disconnect. Check the connection and try again.')
+    } finally {
+      setConnectionBusy(false)
+    }
+  }
 
   async function exportEncrypted() {
     setError(null)
@@ -161,8 +256,54 @@ export function BackupRecovery({ onRestored }: { onRestored: () => void }) {
       <section className="backup-status panel">
         <div>
           <div className="eyebrow">CROSS-DEVICE SYNC</div>
-          <h2>Not connected</h2>
-          <p>Secure GitHub and Cloudflare setup has not been configured. Nothing is being uploaded.</p>
+          <h2>
+            {githubStatus.kind === 'connected' ? 'Private repository verified'
+              : githubStatus.kind === 'not-connected' ? 'Not connected'
+                : githubStatus.kind === 'not-configured' ? 'Connection setup unavailable'
+                    : githubStatus.kind === 'verification-unavailable' ? 'Unable to verify connection'
+                    : githubStatus.kind === 'unavailable' ? 'Status unavailable'
+                    : 'Checking connection'}
+          </h2>
+          <p aria-live="polite">
+            {githubStatus.kind === 'connected'
+              ? `Verified ${new Intl.DateTimeFormat('en', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(githubStatus.verifiedAt))}. ${'thisissurreal2/HUSSHUSS-data'} is private.`
+              : githubStatus.kind === 'not-connected'
+                ? 'No GitHub installation is connected to this device. Fitness data remains local.'
+                : githubStatus.kind === 'not-configured'
+                  ? 'The secure connection service is not configured. Nothing is uploaded.'
+                  : githubStatus.kind === 'verification-unavailable'
+                    ? 'GitHub could not verify the existing installation. No connected state is assumed, and no fitness data was sent.'
+                  : githubStatus.kind === 'unavailable'
+                    ? 'The secure connection service could not be reached or returned an invalid status. No connected state is assumed.'
+                    : 'Checking with the secure connection service…'}
+          </p>
+          <p>Phase 4.2 verifies the private repository only. Fitness data upload and remote sync are not enabled.</p>
+          {connectionMessage && <p className="connection-message" role="status">{connectionMessage}</p>}
+          <div className="backup-actions connection-actions">
+            {githubStatus.kind === 'not-connected' && (
+              <button
+                className="button-primary"
+                type="button"
+                disabled={connectionBusy}
+                onClick={() => { window.location.assign('/api/github/connect') }}
+              >
+                Connect private repository
+              </button>
+            )}
+            {(githubStatus.kind === 'connected' || githubStatus.kind === 'verification-unavailable') && (
+              <button className="button-secondary" type="button" disabled={connectionBusy} onClick={() => void disconnectGitHub()}>
+                Disconnect this device
+              </button>
+            )}
+            <button
+              className="button-secondary"
+              type="button"
+              disabled={connectionBusy || githubStatus.kind === 'checking'}
+              onClick={() => void refreshGitHubStatus()}
+            >
+              Check status
+            </button>
+          </div>
         </div>
         <div className="backup-queue-count">
           <strong>{pendingCount === null ? '—' : pendingCount}</strong>
