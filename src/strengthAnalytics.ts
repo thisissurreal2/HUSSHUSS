@@ -26,11 +26,11 @@ export type PersonalRecord = {
   firstBenchmark: boolean
 }
 
-function isStandardRepRange(targetReps: string): boolean {
+export function isStandardRepRange(targetReps: string): boolean {
   return /^\d+\s*[-–]\s*\d+$/.test(targetReps)
 }
 
-function getCompletedSets(exercise: RecordedExercise): StrengthSet[] {
+export function getCompletedSets(exercise: RecordedExercise): StrengthSet[] {
   return exercise.sets.flatMap((set: RecordedSet) => (
     set.completed
       && set.reps !== null

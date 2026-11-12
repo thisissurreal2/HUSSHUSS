@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { HistoryPage, WorkoutSession, type RestTimerProps } from './WorkoutFeatures'
 import { PerformanceDashboard } from './PerformanceDashboard'
 import { StrengthProgressPage } from './StrengthProgress'
+import { MuscleBalance } from './MuscleBalance.tsx'
 import { BodyMeasurements } from './BodyMeasurements'
 import { AthleticDevelopment } from './AthleticDevelopment'
 import { PersonalInsights } from './PersonalInsights'
@@ -45,7 +46,7 @@ const navigation: { id: Tab; label: string; icon: IconName }[] = [
 ]
 
 type Tab = 'overview' | 'rotation' | 'history' | 'progress' | 'body'
-type ProgressView = 'dashboard' | 'strength' | 'athletic' | 'insights' | 'backup'
+type ProgressView = 'dashboard' | 'strength' | 'muscle' | 'athletic' | 'insights' | 'backup'
 
 function Icon({
   name,
@@ -491,6 +492,14 @@ function App() {
                 </button>
                 <button
                   type="button"
+                  className={progressView === 'muscle' ? 'selected' : ''}
+                  aria-pressed={progressView === 'muscle'}
+                  onClick={() => setProgressView('muscle')}
+                >
+                  Muscle balance
+                </button>
+                <button
+                  type="button"
                   className={progressView === 'athletic' ? 'selected' : ''}
                   aria-pressed={progressView === 'athletic'}
                   onClick={() => setProgressView('athletic')}
@@ -524,6 +533,7 @@ function App() {
               <div hidden={progressView !== 'strength'}>
                 <StrengthProgressPage history={data.history} />
               </div>
+              {progressView === 'muscle' && <MuscleBalance history={data.history} />}
               <div hidden={progressView !== 'athletic'}>
                 <AthleticDevelopment />
               </div>
