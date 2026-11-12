@@ -106,6 +106,7 @@ function App() {
     typeof Notification === 'undefined' ? 'unsupported' : Notification.permission,
   )
   const completedTimerRef = useRef<number | null>(null)
+  const timerWarningRef = useRef<string | null>(null)
   const finishingWorkoutRef = useRef(false)
   const [now] = useState(() => new Date())
   const workout = data.currentWorkout
@@ -249,21 +250,56 @@ function App() {
   }
 
   function selectRestDuration(seconds: number) {
+    const safeSeconds = Math.max(15, Math.min(600, Math.round(seconds)))
+    timerWarningRef.current = null
     updateData((current) => ({
       ...current,
-      restDurationSeconds: seconds,
-      timerRemainingSeconds: seconds,
+      restDurationSeconds: safeSeconds,
+      timerRemainingSeconds: safeSeconds,
       timerDeadline: null,
       timerRunning: false,
     }))
     setTimerNotice(null)
   }
 
-  function startRestTimer() {
+  function adjustRestTimer(deltaSeconds: number) {
     const current = dataRef.current
-    const remaining = current.timerRemainingSeconds || current.restDurationSeconds
+    const remaining = current.timerRunning && current.timerDeadline !== null
+      ? Math.max(0, Math.ceil((current.timerDeadline - Date.now()) / 1000))
+      : current.timerRemainingSeconds
+    const nextRemaining = Math.max(0, Math.min(600, remaining + deltaSeconds))
+    const nextDeadline = current.timerRunning ? Date.now() + nextRemaining * 1000 : null
+    timerWarningRef.current = null
+    updateData((latest) => ({
+      ...latest,
+      timerRemainingSeconds: nextRemaining,
+      timerDeadline: nextDeadline,
+      timerRunning: latest.timerRunning && nextRemaining > 0,
+    }))
+  }
+
+  function skipRestTimer() {
+    completedTimerRef.current = null
+    timerWarningRef.current = null
+    updateData((current) => ({
+      ...current,
+      timerRemainingSeconds: 0,
+      timerDeadline: null,
+      timerRunning: false,
+    }))
+    setTimerNotice('Rest skipped. Continue when you’re ready.')
+  }
+
+  function updateTimerPreference(key: 'timerAutoStart' | 'timerCountdownWarnings' | 'timerVibration', value: boolean) {
+    updateData((current) => ({ ...current, [key]: value }))
+  }
+
+  function startRestTimer(restartFullDuration = false) {
+    const current = dataRef.current
+    const remaining = restartFullDuration ? current.restDurationSeconds : current.timerRemainingSeconds || current.restDurationSeconds
     const deadline = Date.now() + remaining * 1000
     completedTimerRef.current = null
+    timerWarningRef.current = null
     updateData((latest) => ({
       ...latest,
       timerRemainingSeconds: remaining,
@@ -295,6 +331,7 @@ function App() {
 
   function resetRestTimer() {
     completedTimerRef.current = null
+    timerWarningRef.current = null
     updateData((current) => ({
       ...current,
       timerRemainingSeconds: current.restDurationSeconds,
@@ -305,6 +342,7 @@ function App() {
   }
 
   async function alertRestTimerFinished() {
+    if (dataRef.current.timerVibration && typeof navigator !== 'undefined' && 'vibrate' in navigator) navigator.vibrate?.([180, 90, 180])
     let notificationShown = false
     if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
       try {
@@ -356,6 +394,14 @@ function App() {
         updateData((latest) => latest.timerDeadline !== deadline
           ? latest
           : { ...latest, timerRemainingSeconds: remaining })
+        if (current.timerCountdownWarnings && [10, 5, 3].includes(remaining)) {
+          const warningKey = `${deadline}:${remaining}`
+          if (timerWarningRef.current !== warningKey) {
+            timerWarningRef.current = warningKey
+            if (current.timerVibration && typeof navigator !== 'undefined' && 'vibrate' in navigator) navigator.vibrate?.(55)
+            void playSound('timer')
+          }
+        }
       }
     }
     updateRemaining()
@@ -470,6 +516,17 @@ function App() {
                 onStart: startRestTimer,
                 onPause: pauseRestTimer,
                 onReset: resetRestTimer,
+                onAdjust: adjustRestTimer,
+                onSkip: skipRestTimer,
+                autoStartOnSet: data.timerAutoStart ?? true,
+                countdownWarnings: data.timerCountdownWarnings ?? true,
+                vibrationEnabled: data.timerVibration ?? false,
+                onToggleAutoStart: (value: boolean) => updateTimerPreference('timerAutoStart', value),
+                onToggleCountdownWarnings: (value: boolean) => updateTimerPreference('timerCountdownWarnings', value),
+                onToggleVibration: (value: boolean) => updateTimerPreference('timerVibration', value),
+                onWorkUnitComplete: () => {
+                  if (dataRef.current.timerAutoStart ?? true) startRestTimer(true)
+                },
                 onEnableNotifications: () => { void enableTimerNotifications() },
               }}
               onOpenRotation={() => goToTab('rotation')}
@@ -482,7 +539,7 @@ function App() {
               onOpenExtras={() => { setExtraLaunchCategory(null); setActiveTab('extras') }}
             />
           )}
-          {activeTab === 'extras' && <ExtrasPage initialCategory={extraLaunchCategory} sessions={data.extrasSessions ?? []} favourites={data.extrasFavourites ?? []} onToggleFavourite={(id: string) => updateData((current) => ({ ...current, extrasFavourites: (current.extrasFavourites ?? []).includes(id) ? (current.extrasFavourites ?? []).filter((item) => item !== id) : [...(current.extrasFavourites ?? []), id] }))} timer={{ durationSeconds: data.restDurationSeconds, remainingSeconds: data.timerRemainingSeconds, running: data.timerRunning, deadline: data.timerDeadline, notificationAvailable: typeof Notification !== 'undefined', notificationPermission, notice: timerNotice, onSelectDuration: selectRestDuration, onStart: startRestTimer, onPause: pauseRestTimer, onReset: resetRestTimer, onEnableNotifications: () => { void enableTimerNotifications() } }} onSave={saveExtraSession} onBack={() => { setExtraLaunchCategory(null); setActiveTab('rotation') }} />}
+          {activeTab === 'extras' && <ExtrasPage initialCategory={extraLaunchCategory} sessions={data.extrasSessions ?? []} favourites={data.extrasFavourites ?? []} onToggleFavourite={(id: string) => updateData((current) => ({ ...current, extrasFavourites: (current.extrasFavourites ?? []).includes(id) ? (current.extrasFavourites ?? []).filter((item) => item !== id) : [...(current.extrasFavourites ?? []), id] }))} timer={{ durationSeconds: data.restDurationSeconds, remainingSeconds: data.timerRemainingSeconds, running: data.timerRunning, deadline: data.timerDeadline, notificationAvailable: typeof Notification !== 'undefined', notificationPermission, notice: timerNotice, onSelectDuration: selectRestDuration, onStart: startRestTimer, onPause: pauseRestTimer, onReset: resetRestTimer, onAdjust: adjustRestTimer, onSkip: skipRestTimer, autoStartOnSet: data.timerAutoStart ?? true, countdownWarnings: data.timerCountdownWarnings ?? true, vibrationEnabled: data.timerVibration ?? false, onToggleAutoStart: (value: boolean) => updateTimerPreference('timerAutoStart', value), onToggleCountdownWarnings: (value: boolean) => updateTimerPreference('timerCountdownWarnings', value), onToggleVibration: (value: boolean) => updateTimerPreference('timerVibration', value), onWorkUnitComplete: () => { if (dataRef.current.timerAutoStart ?? true) startRestTimer(true) }, onEnableNotifications: () => { void enableTimerNotifications() } }} onSave={saveExtraSession} onBack={() => { setExtraLaunchCategory(null); setActiveTab('rotation') }} />}
           {activeTab === 'history' && (
             <HistoryPage history={data.history} onDelete={deleteHistoryRecord} />
           )}
