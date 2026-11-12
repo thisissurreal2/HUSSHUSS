@@ -172,7 +172,7 @@ function App() {
     const nextWorkoutId: WorkoutId = workouts[current.rotationIndex].id
     updateData((latest) => ({
       ...latest,
-      currentWorkout: createActiveWorkout(nextWorkoutId),
+      currentWorkout: createActiveWorkout(nextWorkoutId, Date.now(), latest.history),
       recoverySelected: false,
     }))
     setActiveTab('overview')

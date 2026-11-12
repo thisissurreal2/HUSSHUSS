@@ -87,23 +87,47 @@ export function createId(): string {
     ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
 }
 
-export function createActiveWorkout(workoutId: WorkoutId, startedAt = Date.now()): ActiveWorkout {
+function previousSets(history: WorkoutRecord[], exerciseId: string): RecordedSet[] {
+  let latestAt = -1
+  let latest: RecordedSet[] = []
+  for (const record of history) {
+    const exercise = record.exercises.find((item) => item.exerciseId === exerciseId)
+    if (!exercise || record.completedAt <= latestAt) continue
+    const done = exercise.sets.filter((set) => set.completed && set.weightKg !== null && set.reps !== null)
+    if (done.length === 0) continue
+    latestAt = record.completedAt
+    latest = done
+  }
+  return latest
+}
+
+export function createActiveWorkout(
+  workoutId: WorkoutId,
+  startedAt = Date.now(),
+  history: WorkoutRecord[] = [],
+): ActiveWorkout {
   const workout = getWorkout(workoutId)
   return {
     id: createId(),
     workoutId,
     startedAt,
     template: workout,
-    exercises: workout.exercises.map((exercise) => ({
-      exerciseId: exercise.id,
-      completed: false,
-      sets: Array.from({ length: exercise.targetSets }, () => ({
-        id: createId(),
-        weightKg: '',
-        reps: '',
+    exercises: workout.exercises.map((exercise) => {
+      const previous = previousSets(history, exercise.id)
+      return {
+        exerciseId: exercise.id,
         completed: false,
-      })),
-    })),
+        sets: Array.from({ length: exercise.targetSets }, (_, index) => {
+          const last = previous[Math.min(index, previous.length - 1)]
+          return {
+            id: createId(),
+            weightKg: last ? String(last.weightKg) : '',
+            reps: last ? String(last.reps) : '',
+            completed: false,
+          }
+        }),
+      }
+    }),
     warmupCompletedIds: [],
     cooldownCompletedIds: [],
   }
