@@ -264,6 +264,7 @@ export function WorkoutSession({
                           set.id,
                           (item) => ({ ...item, completed: !item.completed }),
                         ))
+                        if (!set.completed) timerProps.onWorkUnitComplete()
                       }}
                       aria-label={`${set.completed ? 'Unmark' : 'Mark'} set ${setIndex + 1} complete for ${exercise.name}`}
                       aria-pressed={set.completed}
@@ -361,6 +362,15 @@ export type RestTimerProps = {
   onStart: () => void
   onPause: () => void
   onReset: () => void
+  onAdjust: (deltaSeconds: number) => void
+  onSkip: () => void
+  autoStartOnSet: boolean
+  countdownWarnings: boolean
+  vibrationEnabled: boolean
+  onToggleAutoStart: (value: boolean) => void
+  onToggleCountdownWarnings: (value: boolean) => void
+  onToggleVibration: (value: boolean) => void
+  onWorkUnitComplete: () => void
   onEnableNotifications: () => void
 }
 
@@ -376,8 +386,18 @@ export function RestTimer({
   onStart,
   onPause,
   onReset,
+  onAdjust,
+  onSkip,
+  autoStartOnSet,
+  countdownWarnings,
+  vibrationEnabled,
+  onToggleAutoStart,
+  onToggleCountdownWarnings,
+  onToggleVibration,
   onEnableNotifications,
 }: RestTimerProps) {
+  const [customMinutes, setCustomMinutes] = useState('1')
+  const [customSeconds, setCustomSeconds] = useState('30')
   const minutes = Math.floor(remainingSeconds / 60)
   const seconds = remainingSeconds % 60
 
@@ -404,6 +424,27 @@ export function RestTimer({
           </button>
         ))}
       </div>
+      <div className="timer-adjustments" aria-label="Adjust remaining rest time">
+        <button type="button" onClick={() => onAdjust(-30)} disabled={remainingSeconds <= 0}>−30s</button>
+        <button type="button" onClick={() => onAdjust(-15)} disabled={remainingSeconds <= 0}>−15s</button>
+        <button type="button" onClick={() => onAdjust(15)}>+15s</button>
+        <button type="button" onClick={() => onAdjust(30)}>+30s</button>
+      </div>
+      <form className="timer-custom-form" onSubmit={(event) => {
+        event.preventDefault()
+        const total = Number(customMinutes || 0) * 60 + Number(customSeconds || 0)
+        if (Number.isInteger(total) && total >= 15 && total <= 600) onSelectDuration(total)
+      }}>
+        <label>
+          <span>MIN</span>
+          <input aria-label="Custom rest minutes" inputMode="numeric" type="number" min="0" max="10" value={customMinutes} onChange={(event) => setCustomMinutes(event.currentTarget.value)} />
+        </label>
+        <label>
+          <span>SEC</span>
+          <input aria-label="Custom rest seconds" inputMode="numeric" type="number" min="0" max="59" value={customSeconds} onChange={(event) => setCustomSeconds(event.currentTarget.value)} />
+        </label>
+        <button type="submit">Set custom</button>
+      </form>
       <div className="timer-controls">
         {running ? (
           <button className="timer-main-button" onClick={onPause}><Icon name="pause" size={15} /> Pause</button>
@@ -413,12 +454,18 @@ export function RestTimer({
           </button>
         )}
         <button className="timer-reset-button" onClick={onReset}><Icon name="reset" size={15} /> Reset</button>
+        <button className="timer-reset-button" onClick={onSkip} disabled={remainingSeconds === 0 && !running}>Skip rest</button>
         <SoundToggle />
         {notificationAvailable && notificationPermission !== 'granted' && (
           <button className="timer-notification-button" onClick={onEnableNotifications}>
             Enable alert
           </button>
         )}
+      </div>
+      <div className="timer-settings" aria-label="Rest timer settings">
+        <label><input type="checkbox" checked={autoStartOnSet} onChange={(event) => onToggleAutoStart(event.currentTarget.checked)} /> Auto-start after completed set</label>
+        <label><input type="checkbox" checked={countdownWarnings} onChange={(event) => onToggleCountdownWarnings(event.currentTarget.checked)} /> 10 / 5 / 3 second warnings</label>
+        <label><input type="checkbox" checked={vibrationEnabled} onChange={(event) => onToggleVibration(event.currentTarget.checked)} /> Vibration alerts</label>
       </div>
       <p className="timer-note" aria-live="polite">
         {notice ?? (remainingSeconds === 0

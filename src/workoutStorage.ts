@@ -67,9 +67,14 @@ export type AppData = {
   recoverySelected: boolean
   extrasSessions?: ExtraSessionRecord[]
   extrasFavourites?: string[]
+  timerAutoStart?: boolean
+  timerCountdownWarnings?: boolean
+  timerVibration?: boolean
 }
 
 export const restPresets = [30, 60, 90, 120, 180] as const
+export const MIN_REST_SECONDS = 15
+export const MAX_REST_SECONDS = 600
 
 export function createInitialData(): AppData {
   return {
@@ -84,6 +89,9 @@ export function createInitialData(): AppData {
     recoverySelected: false,
     extrasSessions: [],
     extrasFavourites: [],
+    timerAutoStart: true,
+    timerCountdownWarnings: true,
+    timerVibration: false,
   }
 }
 
@@ -315,12 +323,15 @@ export function isAppData(value: unknown): value is AppData {
     || (value.rotationIndex as number) < 0 || (value.rotationIndex as number) >= workouts.length
     || !(value.currentWorkout === null || isActiveWorkout(value.currentWorkout))
     || !Array.isArray(value.history) || !value.history.every(isWorkoutRecord)
-    || !restPresets.some((duration) => duration === value.restDurationSeconds)
+    || !Number.isInteger(value.restDurationSeconds) || (value.restDurationSeconds as number) < MIN_REST_SECONDS || (value.restDurationSeconds as number) > MAX_REST_SECONDS
     || !Number.isInteger(value.timerRemainingSeconds)
-    || (value.timerRemainingSeconds as number) < 0 || (value.timerRemainingSeconds as number) > 180
+    || (value.timerRemainingSeconds as number) < 0 || (value.timerRemainingSeconds as number) > MAX_REST_SECONDS
     || !(value.timerDeadline === null || isTimestamp(value.timerDeadline))
     || typeof value.timerRunning !== 'boolean'
     || typeof value.recoverySelected !== 'boolean'
+     || (value.timerAutoStart !== undefined && typeof value.timerAutoStart !== 'boolean')
+     || (value.timerCountdownWarnings !== undefined && typeof value.timerCountdownWarnings !== 'boolean')
+     || (value.timerVibration !== undefined && typeof value.timerVibration !== 'boolean')
     || (value.extrasSessions !== undefined && (!Array.isArray(value.extrasSessions) || !value.extrasSessions.every(isExtraSessionRecord)))
     || (value.extrasFavourites !== undefined && (!Array.isArray(value.extrasFavourites) || !value.extrasFavourites.every((id) => typeof id === 'string' && Boolean(id))))) {
     return false
@@ -343,12 +354,15 @@ function isLegacyAppData(value: unknown): value is LegacyAppData {
     || (value.rotationIndex as number) < 0 || (value.rotationIndex as number) >= workouts.length
     || !(value.currentWorkout === null || isLegacyActiveWorkout(value.currentWorkout))
     || !Array.isArray(value.history) || !value.history.every(isWorkoutRecord)
-    || !restPresets.some((duration) => duration === value.restDurationSeconds)
+    || !Number.isInteger(value.restDurationSeconds) || (value.restDurationSeconds as number) < MIN_REST_SECONDS || (value.restDurationSeconds as number) > MAX_REST_SECONDS
     || !Number.isInteger(value.timerRemainingSeconds)
-    || (value.timerRemainingSeconds as number) < 0 || (value.timerRemainingSeconds as number) > 180
+    || (value.timerRemainingSeconds as number) < 0 || (value.timerRemainingSeconds as number) > MAX_REST_SECONDS
     || !(value.timerDeadline === null || isTimestamp(value.timerDeadline))
     || typeof value.timerRunning !== 'boolean'
     || typeof value.recoverySelected !== 'boolean'
+     || (value.timerAutoStart !== undefined && typeof value.timerAutoStart !== 'boolean')
+     || (value.timerCountdownWarnings !== undefined && typeof value.timerCountdownWarnings !== 'boolean')
+     || (value.timerVibration !== undefined && typeof value.timerVibration !== 'boolean')
     || (value.extrasSessions !== undefined && (!Array.isArray(value.extrasSessions) || !value.extrasSessions.every(isExtraSessionRecord)))
     || (value.extrasFavourites !== undefined && (!Array.isArray(value.extrasFavourites) || !value.extrasFavourites.every((id) => typeof id === 'string' && Boolean(id))))) {
     return false
@@ -397,17 +411,20 @@ function migrateLegacyData(legacy: LegacyAppData): AppData {
     currentWorkout: migratedWorkout,
     extrasSessions: legacy.extrasSessions ?? [],
     extrasFavourites: legacy.extrasFavourites ?? [],
+    timerAutoStart: legacy.timerAutoStart ?? true,
+    timerCountdownWarnings: legacy.timerCountdownWarnings ?? true,
+    timerVibration: legacy.timerVibration ?? false,
   }
 }
 
 export function normalizeAppData(value: unknown): AppData | null {
-  if (isAppData(value)) return { ...value, extrasSessions: value.extrasSessions ?? [], extrasFavourites: value.extrasFavourites ?? [] }
+  if (isAppData(value)) return { ...value, extrasSessions: value.extrasSessions ?? [], extrasFavourites: value.extrasFavourites ?? [], timerAutoStart: value.timerAutoStart ?? true, timerCountdownWarnings: value.timerCountdownWarnings ?? true, timerVibration: value.timerVibration ?? false }
   return isLegacyAppData(value) ? migrateLegacyData(value) : null
 }
 
 export async function readAppData(): Promise<{ data: AppData; error: string | null; usable: boolean }> {
   const result = await readPrimarySnapshot('workouts', STORAGE_KEY, isAppData, normalizeAppData, createInitialData())
-  return { ...result, data: { ...result.data, extrasSessions: result.data.extrasSessions ?? [], extrasFavourites: result.data.extrasFavourites ?? [] } }
+  return { ...result, data: { ...result.data, extrasSessions: result.data.extrasSessions ?? [], extrasFavourites: result.data.extrasFavourites ?? [], timerAutoStart: result.data.timerAutoStart ?? true, timerCountdownWarnings: result.data.timerCountdownWarnings ?? true, timerVibration: result.data.timerVibration ?? false } }
 }
 
 export function writeAppData(data: AppData): Promise<void> {

@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "tsc -b && tsc -p tsconfig.functions.json && vite build",
     "lint": "oxlint",
-    "test": "node --test --test-concurrency=1 tests/github-connection.test.mjs tests/local-database.test.mjs tests/xp.test.mjs tests/muscle-balance.test.mjs tests/extras.test.mjs",
+    "test": "node --test --test-concurrency=1 tests/github-connection.test.mjs tests/local-database.test.mjs tests/xp.test.mjs tests/muscle-balance.test.mjs tests/extras.test.mjs tests/rest-timer.test.mjs",
     "test:github": "node --test tests/github-connection.test.mjs",
     "preview": "vite preview"
   },
