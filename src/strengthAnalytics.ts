@@ -54,6 +54,7 @@ export function getExercisePerformances(
   history: WorkoutRecord[],
   exerciseId: string,
 ): ExercisePerformance[] {
+  const historyOrder = new Map(history.map((record, index) => [record.id, index]))
   return history
     .flatMap((record) => {
       const exercise = record.exercises.find((item) => item.exerciseId === exerciseId)
@@ -74,7 +75,8 @@ export function getExercisePerformances(
           : null,
       }]
     })
-    .sort((a, b) => a.record.completedAt - b.record.completedAt)
+    .sort((a, b) => a.record.completedAt - b.record.completedAt
+      || (historyOrder.get(b.record.id) ?? 0) - (historyOrder.get(a.record.id) ?? 0))
 }
 
 export function getProgressionRecommendation(

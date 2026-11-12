@@ -1,4 +1,6 @@
 import { useState } from 'react'
+import { playSound } from './sound'
+import { SoundToggle } from './soundToggle'
 import { restPresets, type ActiveWorkout, type SetEntry, type WorkoutRecord } from './workoutStorage'
 import { PreviousPerformance } from './StrengthProgress'
 import type { ChecklistItem, Workout } from './workouts'
@@ -254,12 +256,15 @@ export function WorkoutSession({
                     />
                     <button
                       className={`set-complete-button ${set.completed ? 'selected' : ''}`}
-                      onClick={() => onChange((current) => updateSet(
-                        current,
-                        exercise.id,
-                        set.id,
-                        (item) => ({ ...item, completed: !item.completed }),
-                      ))}
+                      onClick={() => {
+                        if (!set.completed) void playSound('set')
+                        onChange((current) => updateSet(
+                          current,
+                          exercise.id,
+                          set.id,
+                          (item) => ({ ...item, completed: !item.completed }),
+                        ))
+                      }}
                       aria-label={`${set.completed ? 'Unmark' : 'Mark'} set ${setIndex + 1} complete for ${exercise.name}`}
                       aria-pressed={set.completed}
                     >
@@ -408,6 +413,7 @@ export function RestTimer({
           </button>
         )}
         <button className="timer-reset-button" onClick={onReset}><Icon name="reset" size={15} /> Reset</button>
+        <SoundToggle />
         {notificationAvailable && notificationPermission !== 'granted' && (
           <button className="timer-notification-button" onClick={onEnableNotifications}>
             Enable alert

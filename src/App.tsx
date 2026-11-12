@@ -5,6 +5,9 @@ import { StrengthProgressPage } from './StrengthProgress'
 import { BodyMeasurements } from './BodyMeasurements'
 import { AthleticDevelopment } from './AthleticDevelopment'
 import { PersonalInsights } from './PersonalInsights'
+import { XpCard } from './xpCard'
+import { didWorkoutLevelUp } from './xp'
+import { isSoundEnabled, playSound, unlockSound } from './sound'
 import { BackupRecovery } from './BackupRecovery'
 import { readMeasurementData } from './measurementStorage'
 import { readAthleticData } from './athleticStorage'
@@ -104,7 +107,6 @@ function App() {
   const [notificationPermission, setNotificationPermission] = useState<NotificationPermission | 'unsupported'>(
     typeof Notification === 'undefined' ? 'unsupported' : Notification.permission,
   )
-  const audioContextRef = useRef<AudioContext | null>(null)
   const completedTimerRef = useRef<number | null>(null)
   const [now] = useState(() => new Date())
   const workout = data.currentWorkout
@@ -210,6 +212,8 @@ function App() {
 
     try {
       const record = createWorkoutRecord(current)
+      const currentHistory = dataRef.current.history
+      const leveledUp = didWorkoutLevelUp(currentHistory, record)
       updateData((latest) => {
         if (latest.currentWorkout?.id !== current.id
           || latest.history.some((item) => item.id === record.id)) return latest
@@ -224,6 +228,9 @@ function App() {
           timerRemainingSeconds: latest.restDurationSeconds,
         }
       })
+      if (dataRef.current.history.some((item) => item.id === record.id)) {
+        void playSound(leveledUp ? 'levelUp' : 'finish')
+      }
     } catch {
       setStorageError('The workout could not be completed. Your current session is still available to resume.')
     }
@@ -252,15 +259,12 @@ function App() {
       timerRunning: true,
     }))
     setTimerNotice(null)
-    try {
-      if (!audioContextRef.current && typeof window.AudioContext !== 'undefined') {
-        audioContextRef.current = new window.AudioContext()
-      }
-      void audioContextRef.current?.resume().catch(() => {
-        setTimerNotice('The timer is running. Browser sound is unavailable; keep the timer visible for its on-screen alert.')
+    if (isSoundEnabled()) {
+      void unlockSound().then((unlocked) => {
+        if (!unlocked && isSoundEnabled()) {
+          setTimerNotice('The timer is running. Browser sound is unavailable; keep the timer visible for its on-screen alert.')
+        }
       })
-    } catch {
-      setTimerNotice('The timer is running. Browser sound is unavailable; keep the timer visible for its on-screen alert.')
     }
   }
 
@@ -288,7 +292,7 @@ function App() {
     setTimerNotice(null)
   }
 
-  function alertRestTimerFinished() {
+  async function alertRestTimerFinished() {
     let notificationShown = false
     if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
       try {
@@ -299,21 +303,7 @@ function App() {
       }
     }
 
-    const context = audioContextRef.current
-    if (context) {
-      void context.resume().then(() => {
-        const oscillator = context.createOscillator()
-        const gain = context.createGain()
-        oscillator.frequency.value = 660
-        gain.gain.setValueAtTime(0.0001, context.currentTime)
-        gain.gain.exponentialRampToValueAtTime(0.14, context.currentTime + 0.02)
-        gain.gain.exponentialRampToValueAtTime(0.0001, context.currentTime + 0.45)
-        oscillator.connect(gain)
-        gain.connect(context.destination)
-        oscillator.start()
-        oscillator.stop(context.currentTime + 0.46)
-      }).catch(() => setTimerNotice('Rest complete. Take the next set when you’re ready.'))
-    } else if (!notificationShown) {
+    if (!(await playSound('timer')) && !notificationShown) {
       setTimerNotice('Rest complete. Take the next set when you’re ready.')
     }
   }
@@ -348,7 +338,7 @@ function App() {
           : { ...latest, timerRunning: false, timerDeadline: null, timerRemainingSeconds: 0 })
         if (completedTimerRef.current !== deadline) {
           completedTimerRef.current = deadline
-          alertRestTimerFinished()
+          void alertRestTimerFinished()
         }
       } else if (remaining !== current.timerRemainingSeconds) {
         updateData((latest) => latest.timerDeadline !== deadline
@@ -627,6 +617,8 @@ function Overview({
         </div>
         <div className="weekly-chip"><Icon name="spark" size={16} /> YOUR PACE, YOURS</div>
       </div>
+
+      <XpCard history={history} />
 
       <section className={`hero-card ${dayStatus === 'recovery' ? 'recovery-hero' : ''}`}>
         <div className="hero-glow" />
