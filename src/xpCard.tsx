@@ -1,8 +1,9 @@
 import { getXpSummary } from './xp'
 import type { WorkoutRecord } from './workoutStorage'
+import type { ExtraSessionRecord } from './extras'
 
-export function XpCard({ history }: { history: WorkoutRecord[] }) {
-  const xp = getXpSummary(history)
+export function XpCard({ history, extras = [] }: { history: WorkoutRecord[]; extras?: ExtraSessionRecord[] }) {
+  const xp = getXpSummary(history, extras)
   const percent = Math.round(xp.progress * 100)
 
   return (

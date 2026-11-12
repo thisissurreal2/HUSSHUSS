@@ -6,12 +6,14 @@ import { queueLocalSnapshots } from './localSyncQueue'
 import { readConsistentPrimarySnapshots } from './localDatabase'
 
 export const BACKUP_FORMAT = 'husshuss-backup'
-export const BACKUP_VERSION = 1
+export const BACKUP_VERSION = 2
+// The encrypted envelope is unchanged (v1) so existing GitHub sync validators remain compatible.
+const ENCRYPTED_BACKUP_VERSION = 1
 export const ENCRYPTED_BACKUP_FORMAT = 'husshuss-encrypted-backup'
 export const ENCRYPTION_ITERATIONS = 600_000
 export const RESTORE_SAFETY_KEY = 'husshuss.restore-safety.v1'
 
-const encryptionAadPrefix = `${ENCRYPTED_BACKUP_FORMAT}\n${BACKUP_VERSION}\nAES-256-GCM\nPBKDF2-SHA-256`
+function encryptionAadPrefix(version: number): string { return `${ENCRYPTED_BACKUP_FORMAT}\n${version}\nAES-256-GCM\nPBKDF2-SHA-256` }
 const encoder = new TextEncoder()
 const decoder = new TextDecoder('utf-8', { fatal: true })
 
@@ -28,7 +30,7 @@ export type BackupBundle = {
 
 type EncryptedBackup = {
   format: typeof ENCRYPTED_BACKUP_FORMAT
-  version: typeof BACKUP_VERSION
+  version: typeof ENCRYPTED_BACKUP_VERSION
   cipher: 'AES-256-GCM'
   kdf: 'PBKDF2-SHA-256'
   iterations: number
@@ -62,8 +64,8 @@ function toArrayBuffer(bytes: Uint8Array): ArrayBuffer {
   return buffer
 }
 
-function encryptionAad(salt: string, iv: string, iterations: number): Uint8Array {
-  return encoder.encode(`${encryptionAadPrefix}\n${iterations}\n${salt}\n${iv}`)
+function encryptionAad(salt: string, iv: string, iterations: number, version: number): Uint8Array {
+  return encoder.encode(`${encryptionAadPrefix(version)}\n${iterations}\n${salt}\n${iv}`)
 }
 
 function requireCrypto(): Crypto {
@@ -87,7 +89,7 @@ function isBackupBundle(value: unknown): value is BackupBundle {
 
 function isEncryptedBackup(value: unknown): value is EncryptedBackup {
   if (!isObject(value) || value.format !== ENCRYPTED_BACKUP_FORMAT
-    || value.version !== BACKUP_VERSION || value.cipher !== 'AES-256-GCM'
+    || value.version !== ENCRYPTED_BACKUP_VERSION || value.cipher !== 'AES-256-GCM'
     || value.kdf !== 'PBKDF2-SHA-256' || typeof value.iterations !== 'number'
     || !Number.isInteger(value.iterations) || value.iterations < 100_000 || value.iterations > 1_000_000
     || typeof value.salt !== 'string' || typeof value.iv !== 'string'
@@ -126,7 +128,7 @@ async function createBundle(): Promise<BackupBundle> {
     version: BACKUP_VERSION,
     exportedAt: new Date().toISOString(),
     data: {
-      workouts: snapshots.workouts,
+      workouts: { ...(snapshots.workouts as AppData), extrasSessions: (snapshots.workouts as AppData).extrasSessions ?? [], extrasFavourites: (snapshots.workouts as AppData).extrasFavourites ?? [] },
       measurements: snapshots.measurements,
       athletic: snapshots.athletic,
     },
@@ -163,14 +165,14 @@ async function encryptBundle(bundle: BackupBundle, passphrase: string): Promise<
     {
       name: 'AES-GCM',
       iv: toArrayBuffer(iv),
-      additionalData: toArrayBuffer(encryptionAad(saltText, ivText, ENCRYPTION_ITERATIONS)),
+      additionalData: toArrayBuffer(encryptionAad(saltText, ivText, ENCRYPTION_ITERATIONS, ENCRYPTED_BACKUP_VERSION)),
     },
     key,
     toArrayBuffer(encoder.encode(plainText)),
   )
   const result: EncryptedBackup = {
     format: ENCRYPTED_BACKUP_FORMAT,
-    version: BACKUP_VERSION,
+    version: ENCRYPTED_BACKUP_VERSION,
     cipher: 'AES-256-GCM',
     kdf: 'PBKDF2-SHA-256',
     iterations: ENCRYPTION_ITERATIONS,
@@ -240,7 +242,7 @@ export async function parseBackup(text: string, passphrase: string): Promise<Bac
         {
           name: 'AES-GCM',
           iv: toArrayBuffer(iv),
-          additionalData: toArrayBuffer(encryptionAad(parsed.salt, parsed.iv, parsed.iterations)),
+          additionalData: toArrayBuffer(encryptionAad(parsed.salt, parsed.iv, parsed.iterations, parsed.version)),
         },
         key,
         toArrayBuffer(base64ToBytes(parsed.ciphertext)),
@@ -255,6 +257,10 @@ export async function parseBackup(text: string, passphrase: string): Promise<Bac
     }
   }
 
+  if (isObject(parsed) && parsed.format === BACKUP_FORMAT && (parsed.version === 1 || parsed.version === BACKUP_VERSION) && isObject(parsed.data)) {
+    const workouts = normalizeAppData(parsed.data.workouts)
+    if (workouts) parsed = { ...parsed, version: BACKUP_VERSION, data: { ...parsed.data, workouts } }
+  }
   if (!isBackupBundle(parsed)) {
     throw new Error('This backup is invalid or uses an unsupported format. No data has been changed.')
   }
@@ -391,7 +397,7 @@ export async function restoreBackup(bundle: BackupBundle): Promise<void> {
 
   window.localStorage.setItem(RESTORE_SAFETY_KEY, recoveryPoint)
   await queueLocalSnapshots([
-    { category: 'workouts', snapshot: bundle.data.workouts },
+    { category: 'workouts', snapshot: { ...bundle.data.workouts, extrasSessions: bundle.data.workouts.extrasSessions ?? [], extrasFavourites: bundle.data.workouts.extrasFavourites ?? [] } },
     { category: 'measurements', snapshot: bundle.data.measurements },
     { category: 'athletic', snapshot: bundle.data.athletic },
   ])

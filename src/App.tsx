@@ -25,6 +25,8 @@ import {
   type AppData,
 } from './workoutStorage'
 import { getLowerBodyExercise, getWorkout, workouts, type Workout, type WorkoutId } from './workouts'
+import { ExtrasPage } from './ExtrasPage'
+import { getExtraRecommendation, extraCategories, getCategoryExercises, type ExtraCategoryId, type ExtraSessionRecord } from './extras'
 import './App.css'
 
 type IconName =
@@ -48,7 +50,7 @@ const navigation: { id: Tab; label: string; icon: IconName }[] = [
   { id: 'body', label: 'Measurements', icon: 'body' },
 ]
 
-type Tab = 'overview' | 'rotation' | 'history' | 'progress' | 'body'
+type Tab = 'overview' | 'rotation' | 'history' | 'progress' | 'body' | 'extras'
 type ProgressView = 'dashboard' | 'strength' | 'muscle' | 'athletic' | 'insights' | 'backup'
 
 function Icon({
@@ -96,6 +98,7 @@ function App() {
   const dataRef = useRef(data)
   const [storageError, setStorageError] = useState<string | null>(null)
   const [completedWorkout, setCompletedWorkout] = useState<WorkoutRecord | null>(null)
+  const [extraLaunchCategory, setExtraLaunchCategory] = useState<ExtraCategoryId | null>(null)
   const [dataReady, setDataReady] = useState(false)
   const [workoutWriteAvailable, setWorkoutWriteAvailable] = useState(false)
   const [timerNotice, setTimerNotice] = useState<string | null>(null)
@@ -103,6 +106,7 @@ function App() {
     typeof Notification === 'undefined' ? 'unsupported' : Notification.permission,
   )
   const completedTimerRef = useRef<number | null>(null)
+  const finishingWorkoutRef = useRef(false)
   const [now] = useState(() => new Date())
   const workout = data.currentWorkout
     ? data.currentWorkout.template
@@ -200,36 +204,48 @@ function App() {
         })
   }
 
-  function finishWorkout() {
+  async function finishWorkout() {
     const current = dataRef.current.currentWorkout
-    if (!current || current.exercises.some((exercise) => !exercise.completed)) return
+    if (!current || current.exercises.some((exercise) => !exercise.completed) || finishingWorkoutRef.current) return
     if (dataRef.current.history.some((record) => record.id === current.id)) return
-
+    finishingWorkoutRef.current = true
+    const previous = dataRef.current
     try {
       const record = createWorkoutRecord(current)
-      const currentHistory = dataRef.current.history
-      const leveledUp = didWorkoutLevelUp(currentHistory, record)
-      updateData((latest) => {
-        if (latest.currentWorkout?.id !== current.id
-          || latest.history.some((item) => item.id === record.id)) return latest
-        return {
-          ...latest,
-          rotationIndex: (latest.rotationIndex + 1) % workouts.length,
-          currentWorkout: null,
-          history: [record, ...latest.history],
-          recoverySelected: false,
-          timerRunning: false,
-          timerDeadline: null,
-          timerRemainingSeconds: latest.restDurationSeconds,
-        }
-      })
-      if (dataRef.current.history.some((item) => item.id === record.id)) {
-        setCompletedWorkout(record)
-        void playSound(leveledUp ? 'levelUp' : 'finish')
+      const next: AppData = {
+        ...previous,
+        rotationIndex: (previous.rotationIndex + 1) % workouts.length,
+        currentWorkout: null,
+        history: [record, ...previous.history],
+        recoverySelected: false,
+        timerRunning: false,
+        timerDeadline: null,
+        timerRemainingSeconds: previous.restDurationSeconds,
       }
-    } catch {
-      setStorageError('The workout could not be completed. Your current session is still available to resume.')
+      await writeAppData(next)
+      dataRef.current = next
+      setData(next)
+      setStorageError(null)
+      setCompletedWorkout(record)
+      void playSound(didWorkoutLevelUp(previous.history, record, previous.extrasSessions ?? []) ? 'levelUp' : 'finish')
+    } catch (error) {
+      dataRef.current = previous
+      setData(previous)
+      setStorageError(`The workout could not be completed and saved. Your current session is still available to resume. ${error instanceof Error ? error.message : ''}`)
+    } finally {
+      finishingWorkoutRef.current = false
     }
+  }
+
+  async function saveExtraSession(session: ExtraSessionRecord) {
+    const current = dataRef.current
+    if ((current.extrasSessions ?? []).some((item) => item.id === session.id)) return
+    const next = { ...current, extrasSessions: [...(current.extrasSessions ?? []), session] }
+    await writeAppData(next)
+    dataRef.current = next
+    setData(next)
+    setStorageError(null)
+    void playSound('finish')
   }
 
   function selectRestDuration(seconds: number) {
@@ -355,6 +371,7 @@ function App() {
   }
 
   function goToTab(tab: Tab) {
+    if (tab !== 'extras') setExtraLaunchCategory(null)
     setActiveTab(tab)
   }
 
@@ -431,6 +448,7 @@ function App() {
               greeting={greeting}
               completedCount={data.history.length}
               history={data.history}
+              extras={data.extrasSessions ?? []}
               onStart={startWorkout}
               onRecover={() => updateData((current) => current.currentWorkout
                 ? current
@@ -461,8 +479,10 @@ function App() {
             <RotationPage
               rotationIndex={data.rotationIndex}
               onStart={startWorkout}
+              onOpenExtras={() => { setExtraLaunchCategory(null); setActiveTab('extras') }}
             />
           )}
+          {activeTab === 'extras' && <ExtrasPage initialCategory={extraLaunchCategory} sessions={data.extrasSessions ?? []} favourites={data.extrasFavourites ?? []} onToggleFavourite={(id: string) => updateData((current) => ({ ...current, extrasFavourites: (current.extrasFavourites ?? []).includes(id) ? (current.extrasFavourites ?? []).filter((item) => item !== id) : [...(current.extrasFavourites ?? []), id] }))} timer={{ durationSeconds: data.restDurationSeconds, remainingSeconds: data.timerRemainingSeconds, running: data.timerRunning, deadline: data.timerDeadline, notificationAvailable: typeof Notification !== 'undefined', notificationPermission, notice: timerNotice, onSelectDuration: selectRestDuration, onStart: startRestTimer, onPause: pauseRestTimer, onReset: resetRestTimer, onEnableNotifications: () => { void enableTimerNotifications() } }} onSave={saveExtraSession} onBack={() => { setExtraLaunchCategory(null); setActiveTab('rotation') }} />}
           {activeTab === 'history' && (
             <HistoryPage history={data.history} onDelete={deleteHistoryRecord} />
           )}
@@ -528,7 +548,7 @@ function App() {
               <div hidden={progressView !== 'strength'}>
                 <StrengthProgressPage history={data.history} />
               </div>
-              {progressView === 'muscle' && <MuscleBalance history={data.history} />}
+              {progressView === 'muscle' && <MuscleBalance history={data.history} extras={data.extrasSessions ?? []} />}
               <div hidden={progressView !== 'athletic'}>
                 <AthleticDevelopment />
               </div>
@@ -576,6 +596,10 @@ function App() {
                   <img src={mascots.workout} alt="SpongeBob after completing a workout" />
                 </div>
               </div>
+              <section className="extras-recommendation">
+                {(() => { const recommendation = getExtraRecommendation(data.history, data.extrasSessions ?? []); const category = extraCategories.find((item) => item.id === recommendation.category)!; return <div><span className="eyebrow">OPTIONAL · ONLY IF YOU FEEL LIKE IT</span><h2>GOT MORE IN THE TANK?</h2><strong>{category.name}</strong><p>{recommendation.reason} {category.duration} · {getCategoryExercises(recommendation.category).length} exercises.</p></div> })()}
+                <div className="extras-recommendation-actions"><button className="button-primary" onClick={() => { setExtraLaunchCategory(getExtraRecommendation(data.history, data.extrasSessions ?? []).category); setCompletedWorkout(null); setActiveTab('extras') }}>START EXTRA SESSION</button><button className="button-secondary" onClick={() => setCompletedWorkout(null)}>NOT TODAY</button></div>
+              </section>
             </section>
           )}
         </main>
@@ -620,6 +644,7 @@ function Overview({
   greeting,
   completedCount,
   history,
+  extras,
   onStart,
   onRecover,
   onResume,
@@ -636,6 +661,7 @@ function Overview({
   greeting: string
   completedCount: number
   history: AppData['history']
+  extras: ExtraSessionRecord[]
   onStart: () => void
   onRecover: () => void
   onResume: () => void
@@ -660,7 +686,7 @@ function Overview({
         <div className="weekly-chip"><Icon name="spark" size={16} /> YOUR PACE, YOURS</div>
       </div>
 
-      <XpCard history={history} />
+      <XpCard history={history} extras={extras} />
 
       <section className={`hero-card ${dayStatus === 'recovery' ? 'recovery-hero' : ''}`}>
         <div className="hero-content">
@@ -796,9 +822,11 @@ function Overview({
 function RotationPage({
   rotationIndex,
   onStart,
+  onOpenExtras,
 }: {
   rotationIndex: number
   onStart: () => void
+  onOpenExtras: () => void
 }) {
   return (
     <>
@@ -818,6 +846,10 @@ function RotationPage({
           <p>The sequence only moves forward when you mark a session complete. A recovery day leaves it right here.</p>
         </div>
         <button className="button-primary" onClick={onStart}>Start workout <Icon name="arrow" size={17} /></button>
+      </section>
+      <section className="extras-plan-entry panel">
+        <div><div className="eyebrow">OPTIONAL SUPPLEMENTARY TRAINING</div><h2>EXTRAS LIBRARY</h2><p>Neck, grip, calves, posture, athleticism and mobility. Never part of your main rotation.</p></div>
+        <button className="button-primary" onClick={onOpenExtras}>Explore EXTRAS <Icon name="arrow" size={17} /></button>
       </section>
       <div className="rotation-list">
         {workouts.map((item, index) => (

@@ -320,7 +320,7 @@ export function BackupRecovery({ onRestored }: { onRestored: () => void }) {
       ? 'You validated the current remote backup. Replace it with this device’s local data? The two versions will not be merged.'
       : recreatingMissingRemote
         ? 'The previously synced remote backup is missing. Create a new encrypted backup from this device’s local data? The deleted remote version cannot be recovered here.'
-        : 'Encrypt the current local workout, measurement, and athletic data with this passphrase and upload it to your private GitHub repository?'
+        : 'Encrypt the current local workout history (including EXTRAS), measurement, and athletic data with this passphrase and upload it to your private GitHub repository?'
     if (!window.confirm(confirmation)) return
 
     setCloudSyncBusy(true)
@@ -437,7 +437,7 @@ export function BackupRecovery({ onRestored }: { onRestored: () => void }) {
   async function restoreRemoteBackup() {
     if (busy || cloudSyncBusy) return
     if (!remoteRestoreCandidate || githubStatus.kind !== 'connected') return
-    if (!window.confirm('Replace this device’s workouts, measurements, and athletic records with the validated remote backup? A recovery snapshot of current local data will be saved first.')) return
+    if (!window.confirm('Replace this device’s workouts (including EXTRAS), measurements, and athletic records with the validated remote backup? A recovery snapshot of current local data will be saved first.')) return
     setCloudSyncBusy(true)
     setCloudSyncError(null)
     setCloudSyncMessage(null)
@@ -554,7 +554,7 @@ export function BackupRecovery({ onRestored }: { onRestored: () => void }) {
   async function performRestore() {
     if (cloudSyncBusy) return
     if (!validatedBundle) return
-    if (!window.confirm('Replace all HUSSHUSS workout, measurement, and athletic data on this device with this backup? A recovery snapshot of the current data will be saved first.')) return
+    if (!window.confirm('Replace all HUSSHUSS workout history (including EXTRAS), measurement, and athletic data on this device with this backup? A recovery snapshot of the current data will be saved first.')) return
     setError(null)
     setMessage(null)
     setBusy(true)
@@ -884,7 +884,7 @@ export function BackupRecovery({ onRestored }: { onRestored: () => void }) {
 
       <section className="backup-note">
         <strong>Important</strong>
-        <span>These backups include workout history, unfinished workout state, body measurements, and athletic assessments. They do not include unrelated browser data. Store exported files securely.</span>
+        <span>These backups include workout history, unfinished workout state, EXTRAS session history and favourites, body measurements, and athletic assessments. They do not include unrelated browser data. Store exported files securely.</span>
       </section>
     </div>
   )

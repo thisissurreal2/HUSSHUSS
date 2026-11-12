@@ -1,5 +1,6 @@
 import { getPersonalRecords } from './strengthAnalytics'
 import type { WorkoutRecord } from './workoutStorage'
+import type { ExtraSessionRecord } from './extras'
 
 export const XP_PER_SET = 10
 export const XP_PER_WORKOUT = 50
@@ -44,7 +45,7 @@ function titleForLevel(level: number): string {
   return LEVEL_TITLES[Math.min(level, LEVEL_TITLES.length) - 1]
 }
 
-export function getXpSummary(history: WorkoutRecord[]): XpSummary {
+export function getXpSummary(history: WorkoutRecord[], extras: ExtraSessionRecord[] = []): XpSummary {
   const prCountByRecord = new Map<string, number>()
   for (const entry of getPersonalRecords(history)) {
     if (entry.firstBenchmark) continue
@@ -64,6 +65,10 @@ export function getXpSummary(history: WorkoutRecord[]): XpSummary {
     }
   }
 
+  const extraXp = extras.filter((session) => session.status === 'completed').reduce((sum, session) => sum + session.xpEarned, 0)
+  totalXp += extraXp
+  const latestExtra = extras.filter((session) => session.status === 'completed' && session.completedAt !== null).sort((a, b) => (b.completedAt ?? 0) - (a.completedAt ?? 0))[0]
+  if (latestExtra && (latest === null || (latestExtra.completedAt ?? 0) > latest.completedAt)) latest = { completedAt: latestExtra.completedAt ?? 0, xp: latestExtra.xpEarned }
   const level = levelForXp(totalXp)
   const levelStartXp = xpForLevel(level)
   const nextLevelXp = xpForLevel(level + 1)
@@ -79,8 +84,8 @@ export function getXpSummary(history: WorkoutRecord[]): XpSummary {
   }
 }
 
-export function didWorkoutLevelUp(history: WorkoutRecord[], record: WorkoutRecord): boolean {
-  const previousLevel = getXpSummary(history).level
-  const updatedLevel = getXpSummary([record, ...history]).level
+export function didWorkoutLevelUp(history: WorkoutRecord[], record: WorkoutRecord, extras: ExtraSessionRecord[] = []): boolean {
+  const previousLevel = getXpSummary(history, extras).level
+  const updatedLevel = getXpSummary([record, ...history], extras).level
   return updatedLevel > previousLevel
 }

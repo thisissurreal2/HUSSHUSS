@@ -14,6 +14,7 @@ import { workouts } from './workouts'
 import type { WorkoutRecord } from './workoutStorage'
 import { getCompletedSets, isStandardRepRange } from './strengthAnalytics'
 import { getMuscleEntry, getMuscleLabel, muscles, type MuscleId } from './muscleMap'
+import { getExtraExercise, type ExtraSessionRecord } from './extras'
 
 export type MusclePeriod = '7d' | '30d' | '90d'
 
@@ -69,6 +70,78 @@ export type Exposure = {
   /** Sets from exercise IDs that have no entry in the mapping. */
   unmappedSets: number
   unmappedExerciseNames: string[]
+}
+
+
+export type MuscleSource = 'main' | 'extras' | 'combined'
+export type SupplementaryMuscleId = 'neck' | 'traps' | 'forearms'
+export type SupplementaryStat = { muscle: SupplementaryMuscleId; label: string; weightedSets: number; setsPerWeek: number; trainedDays: number }
+
+export function computeExtraExposure(sessions: ExtraSessionRecord[], range: DateRange, days: number): {
+  radar: Map<MuscleId, number>; radarDays: Map<MuscleId, number>; radarContributions: Map<MuscleId, MuscleContribution[]>; supplementary: SupplementaryStat[]; sessionCount: number; countedUnits: number; trainingDays: number
+} {
+  const radar = new Map<MuscleId, number>()
+  const supplementaryIds: SupplementaryMuscleId[] = ['neck', 'traps', 'forearms']
+  const supplementary = new Map<SupplementaryMuscleId, number>()
+  const trained = new Map<SupplementaryMuscleId, Set<string>>()
+  const radarDays = new Map<MuscleId, Set<string>>()
+  const radarContributions = new Map<MuscleId, Map<string, MuscleContribution>>()
+  const trainingDayKeys = new Set<string>()
+  let sessionCount = 0
+  let countedUnits = 0
+  for (const session of sessions) {
+    if (session.status !== 'completed' || session.completedAt === null || session.completedAt < range.start || session.completedAt > range.end) continue
+    sessionCount += 1
+    const day = localDayKey(session.completedAt)
+    trainingDayKeys.add(day)
+    for (const item of session.exercises) {
+      const exercise = getExtraExercise(item.exerciseId)
+      if (!exercise) continue
+      const completed = item.units.filter((unit) => unit.completed).length
+      if (!completed) continue
+      countedUnits += completed
+      const unitScale = exercise.unitType === 'set' ? 1 : exercise.unitType === 'hold' ? 0.5 : exercise.unitType === 'interval' ? 0.35 : 0.75
+      for (const [muscle, weight] of Object.entries(exercise.muscles) as [MuscleId | SupplementaryMuscleId, number][]) {
+        const value = completed * unitScale * weight
+        if (supplementaryIds.includes(muscle as SupplementaryMuscleId)) {
+          const id = muscle as SupplementaryMuscleId
+          supplementary.set(id, (supplementary.get(id) ?? 0) + value)
+          const dates = trained.get(id) ?? new Set<string>(); dates.add(day); trained.set(id, dates)
+        } else {
+          const id = muscle as MuscleId
+          radar.set(id, (radar.get(id) ?? 0) + value)
+          const byExercise = radarContributions.get(id) ?? new Map<string, MuscleContribution>()
+          const previous = byExercise.get(exercise.id)
+          byExercise.set(exercise.id, { exerciseId: exercise.id, name: exercise.name, weightedSets: (previous?.weightedSets ?? 0) + value })
+          radarContributions.set(id, byExercise)
+          const dates = radarDays.get(id) ?? new Set<string>(); dates.add(day); radarDays.set(id, dates)
+        }
+      }
+    }
+  }
+  return {
+    radar,
+    radarDays: new Map([...radarDays].map(([id, dates]) => [id, dates.size])),
+    radarContributions: new Map([...radarContributions].map(([id, values]) => [id, [...values.values()]])),
+    trainingDays: trainingDayKeys.size,
+    supplementary: supplementaryIds.map((muscle) => ({ muscle, label: muscle === 'neck' ? 'Neck' : muscle === 'traps' ? 'Traps' : 'Forearms', weightedSets: supplementary.get(muscle) ?? 0, setsPerWeek: (supplementary.get(muscle) ?? 0) / (days / 7), trainedDays: trained.get(muscle)?.size ?? 0 })),
+    sessionCount,
+    countedUnits,
+  }
+}
+
+export function applyMuscleSource(main: Exposure, extra: ReturnType<typeof computeExtraExposure>, days: number, source: MuscleSource): Exposure {
+  const musclesWithValues = main.muscles.map((stat) => {
+    const extraValue = extra.radar.get(stat.muscle) ?? 0
+    const weightedSets = source === 'main' ? stat.weightedSets : source === 'extras' ? extraValue : stat.weightedSets + extraValue
+    const extraDays = extra.radarDays.get(stat.muscle) ?? 0
+    const extraContributions = (extra.radarContributions.get(stat.muscle) ?? []).map((item) => ({ ...item, name: `EXTRAS · ${item.name}` }))
+    const contributions = source === 'main' ? stat.contributions : source === 'extras' ? extraContributions : [...stat.contributions, ...extraContributions]
+    return { ...stat, weightedSets, setsPerWeek: weightedSets / (days / 7), trainedDays: source === 'main' ? stat.trainedDays : source === 'extras' ? extraDays : Math.min(days, stat.trainedDays + extraDays), contributions }
+  })
+  const total = musclesWithValues.reduce((sum, stat) => sum + stat.weightedSets, 0)
+  const highest = Math.max(0, ...musclesWithValues.map((stat) => stat.weightedSets))
+  return { ...main, muscles: musclesWithValues.map((stat) => ({ ...stat, share: total === 0 ? 0 : stat.weightedSets / total, relative: highest === 0 ? 0 : stat.weightedSets / highest })), workoutCount: source === 'main' ? main.workoutCount : source === 'extras' ? extra.sessionCount : main.workoutCount + extra.sessionCount, countedSets: source === 'main' ? main.countedSets : source === 'extras' ? extra.countedUnits : main.countedSets + extra.countedUnits, totalWeightedSets: total, trainingDays: source === 'main' ? main.trainingDays : source === 'extras' ? extra.trainingDays : Math.min(days, main.trainingDays + extra.trainingDays) }
 }
 
 export type InsightKind = 'pair' | 'gap' | 'change' | 'low' | 'info'
@@ -154,7 +227,7 @@ export function computeExposure(records: WorkoutRecord[], days: number): Exposur
         unmappedNames.add(exercise.name)
         continue
       }
-      if (entry.excluded) {
+      if ('reason' in entry) {
         designExcludedSets += sets.length
         continue
       }
@@ -225,7 +298,7 @@ export function computeExposure(records: WorkoutRecord[], days: number): Exposur
 export function rotationCoversMuscle(muscle: MuscleId): boolean {
   return workouts.some((workout) => workout.exercises.some((exercise) => {
     const entry = getMuscleEntry(exercise.id)
-    return entry !== undefined && !entry.excluded && (entry.weights[muscle] ?? 0) >= 0.5
+    return entry !== undefined && 'weights' in entry && (entry.weights[muscle] ?? 0) >= 0.5
   }))
 }
 

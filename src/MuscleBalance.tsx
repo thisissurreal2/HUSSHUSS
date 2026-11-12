@@ -8,6 +8,8 @@ import {
   type MuscleStat,
 } from './muscleBalance'
 import type { MuscleId } from './muscleMap'
+import type { ExtraSessionRecord } from './extras'
+import { applyMuscleSource, computeExtraExposure, getRanges, type MuscleSource } from './muscleBalance'
 
 const periods = Object.keys(musclePeriodLabels) as MusclePeriod[]
 
@@ -173,10 +175,11 @@ function MuscleDetail({ stat, result }: { stat: MuscleStat; result: MuscleBalanc
   )
 }
 
-export function MuscleBalance({ history }: { history: WorkoutRecord[] }) {
+export function MuscleBalance({ history, extras = [] }: { history: WorkoutRecord[]; extras?: ExtraSessionRecord[] }) {
   const [period, setPeriod] = useState<MusclePeriod>('30d')
   const [selectedId, setSelectedId] = useState<MuscleId | null>(null)
   const [now, setNow] = useState(() => new Date())
+  const [source, setSource] = useState<MuscleSource>('combined')
 
   useEffect(() => {
     const refresh = () => {
@@ -187,8 +190,10 @@ export function MuscleBalance({ history }: { history: WorkoutRecord[] }) {
   }, [])
 
   const result = useMemo(() => analyzeMuscleBalance(history, period, now), [history, period, now])
-  const { current } = result
+  const extraData = useMemo(() => computeExtraExposure(extras, getRanges(period, now).current, result.days), [extras, period, now, result.days])
+  const current = applyMuscleSource(result.current, extraData, result.days, source)
   const ranked = [...current.muscles].sort((a, b) => b.weightedSets - a.weightedSets)
+  const lowMuscles = source === 'main' ? result.lowMuscles : []
   const selected = current.muscles.find((stat) => stat.muscle === selectedId) ?? ranked[0]
   const excludedNotes = [
     current.setsWithoutReps > 0
@@ -230,6 +235,12 @@ export function MuscleBalance({ history }: { history: WorkoutRecord[] }) {
               {musclePeriodLabels[value]}
             </button>
           ))}
+        </div>
+      </section>
+      <section className="performance-period-panel panel" aria-label="Muscle balance source">
+        <div><div className="eyebrow">DATA SOURCE</div><p>Choose which sessions to include</p></div>
+        <div className="performance-period-tabs">
+          {([{ id: 'main', label: 'Main workouts' }, { id: 'extras', label: 'EXTRAS' }, { id: 'combined', label: 'Combined' }] as const).map((item) => <button key={item.id} className={source === item.id ? 'selected' : ''} aria-pressed={source === item.id} onClick={() => setSource(item.id)}>{item.label}</button>)}
         </div>
       </section>
 
@@ -279,7 +290,7 @@ export function MuscleBalance({ history }: { history: WorkoutRecord[] }) {
             <div className="muscle-rows">
               {ranked.map((stat) => {
                 const none = stat.weightedSets === 0
-                const low = result.lowMuscles.includes(stat.muscle)
+                const low = lowMuscles.includes(stat.muscle)
                 return (
                   <button
                     type="button"
@@ -309,11 +320,16 @@ export function MuscleBalance({ history }: { history: WorkoutRecord[] }) {
             </p>
           </section>
 
+          {source !== 'main' && <section className="performance-panel panel extras-supplementary-muscles">
+            <div className="performance-section-heading"><div><div className="eyebrow">SUPPLEMENTARY EXPOSURE</div><h2>Beyond the radar.</h2></div></div>
+            <p className="performance-note">These three groups are tracked separately so the main ten-axis radar stays readable. EXTRAS contributions use reduced set-equivalent weights for holds and intervals.</p>
+            <div className="extras-supplementary-grid">{extraData.supplementary.map((item) => <div key={item.muscle}><span>{item.label}</span><strong>{formatNumber(item.weightedSets)}</strong><small>weighted sets · {formatNumber(item.setsPerWeek)} / wk · {item.trainedDays} days</small></div>)}</div>
+          </section>}
           <section className="performance-panel panel">
             <div className="performance-section-heading">
               <div>
-                <div className="eyebrow">TRAINING INSIGHTS</div>
-                <h2>What your records show.</h2>
+                <div className="eyebrow">MAIN WORKOUT INSIGHTS</div>
+                <h2>What your main programme shows.</h2>
               </div>
             </div>
             {result.insights.length === 0 ? (
@@ -326,7 +342,7 @@ export function MuscleBalance({ history }: { history: WorkoutRecord[] }) {
               </ul>
             )}
             <p className="performance-note">
-              Insights come only from completed sets in your saved history. They describe training exposure, not muscle size,
+              These insight cards use main-workout history; EXTRAS exposure is shown in the source-filtered distribution above. Insights come only from completed sets in your saved history. They describe training exposure, not muscle size,
               strength or development. A lower score can reflect your programme, not a weakness.
             </p>
           </section>

@@ -1,5 +1,6 @@
 import { getWorkout, workouts, type Exercise, type Workout, type WorkoutId } from './workouts'
 import { readPrimarySnapshot, writePrimarySnapshot } from './localDatabase'
+import { isExtraSessionRecord, type ExtraSessionRecord } from './extras'
 
 export const STORAGE_KEY = 'husshuss.data'
 export const DATA_VERSION = 2
@@ -64,6 +65,8 @@ export type AppData = {
   timerDeadline: number | null
   timerRunning: boolean
   recoverySelected: boolean
+  extrasSessions?: ExtraSessionRecord[]
+  extrasFavourites?: string[]
 }
 
 export const restPresets = [30, 60, 90, 120, 180] as const
@@ -79,6 +82,8 @@ export function createInitialData(): AppData {
     timerDeadline: null,
     timerRunning: false,
     recoverySelected: false,
+    extrasSessions: [],
+    extrasFavourites: [],
   }
 }
 
@@ -315,12 +320,18 @@ export function isAppData(value: unknown): value is AppData {
     || (value.timerRemainingSeconds as number) < 0 || (value.timerRemainingSeconds as number) > 180
     || !(value.timerDeadline === null || isTimestamp(value.timerDeadline))
     || typeof value.timerRunning !== 'boolean'
-    || typeof value.recoverySelected !== 'boolean') {
+    || typeof value.recoverySelected !== 'boolean'
+    || (value.extrasSessions !== undefined && (!Array.isArray(value.extrasSessions) || !value.extrasSessions.every(isExtraSessionRecord)))
+    || (value.extrasFavourites !== undefined && (!Array.isArray(value.extrasFavourites) || !value.extrasFavourites.every((id) => typeof id === 'string' && Boolean(id))))) {
     return false
   }
   const ids = value.history.map((record) => (record as WorkoutRecord).id)
   const activeWorkout = value.currentWorkout as ActiveWorkout | null
+  const extras = (value.extrasSessions as ExtraSessionRecord[] | undefined) ?? []
+  const favourites = (value.extrasFavourites as string[] | undefined) ?? []
   return new Set(ids).size === ids.length
+    && new Set(extras.map((session) => session.id)).size === extras.length
+    && new Set(favourites).size === favourites.length
     && (!activeWorkout || activeWorkout.workoutId === workouts[value.rotationIndex as number].id)
     && (!activeWorkout || !ids.includes(activeWorkout.id))
     && ((value.timerRunning as boolean) === (value.timerDeadline !== null))
@@ -337,7 +348,9 @@ function isLegacyAppData(value: unknown): value is LegacyAppData {
     || (value.timerRemainingSeconds as number) < 0 || (value.timerRemainingSeconds as number) > 180
     || !(value.timerDeadline === null || isTimestamp(value.timerDeadline))
     || typeof value.timerRunning !== 'boolean'
-    || typeof value.recoverySelected !== 'boolean') {
+    || typeof value.recoverySelected !== 'boolean'
+    || (value.extrasSessions !== undefined && (!Array.isArray(value.extrasSessions) || !value.extrasSessions.every(isExtraSessionRecord)))
+    || (value.extrasFavourites !== undefined && (!Array.isArray(value.extrasFavourites) || !value.extrasFavourites.every((id) => typeof id === 'string' && Boolean(id))))) {
     return false
   }
   const ids = value.history.map((record) => (record as WorkoutRecord).id)
@@ -382,22 +395,19 @@ function migrateLegacyData(legacy: LegacyAppData): AppData {
     ...legacy,
     version: DATA_VERSION,
     currentWorkout: migratedWorkout,
+    extrasSessions: legacy.extrasSessions ?? [],
+    extrasFavourites: legacy.extrasFavourites ?? [],
   }
 }
 
 export function normalizeAppData(value: unknown): AppData | null {
-  if (isAppData(value)) return value
+  if (isAppData(value)) return { ...value, extrasSessions: value.extrasSessions ?? [], extrasFavourites: value.extrasFavourites ?? [] }
   return isLegacyAppData(value) ? migrateLegacyData(value) : null
 }
 
-export function readAppData(): Promise<{ data: AppData; error: string | null; usable: boolean }> {
-  return readPrimarySnapshot(
-    'workouts',
-    STORAGE_KEY,
-    isAppData,
-    normalizeAppData,
-    createInitialData(),
-  )
+export async function readAppData(): Promise<{ data: AppData; error: string | null; usable: boolean }> {
+  const result = await readPrimarySnapshot('workouts', STORAGE_KEY, isAppData, normalizeAppData, createInitialData())
+  return { ...result, data: { ...result.data, extrasSessions: result.data.extrasSessions ?? [], extrasFavourites: result.data.extrasFavourites ?? [] } }
 }
 
 export function writeAppData(data: AppData): Promise<void> {
