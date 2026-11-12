@@ -3,6 +3,8 @@ import { HistoryPage, WorkoutSession, type RestTimerProps } from './WorkoutFeatu
 import { PerformanceDashboard } from './PerformanceDashboard'
 import { StrengthProgressPage } from './StrengthProgress'
 import { MuscleBalance } from './MuscleBalance.tsx'
+import { BrandMark, BrandWordmark } from './BrandIdentity'
+import { mascots } from './mascots'
 import { BodyMeasurements } from './BodyMeasurements'
 import { AthleticDevelopment } from './AthleticDevelopment'
 import { PersonalInsights } from './PersonalInsights'
@@ -15,6 +17,7 @@ import { readAthleticData } from './athleticStorage'
 import {
   createActiveWorkout,
   createWorkoutRecord,
+  type WorkoutRecord,
   createInitialData,
   readAppData,
   writeAppData,
@@ -86,22 +89,13 @@ function Icon({
   )
 }
 
-function BrandMark() {
-  return (
-    <span className="brand-mark" aria-hidden="true">
-      <span />
-      <span />
-      <span />
-    </span>
-  )
-}
-
 function App() {
   const [activeTab, setActiveTab] = useState<Tab>('overview')
   const [progressView, setProgressView] = useState<ProgressView>('dashboard')
   const [data, setData] = useState<AppData>(createInitialData)
   const dataRef = useRef(data)
   const [storageError, setStorageError] = useState<string | null>(null)
+  const [completedWorkout, setCompletedWorkout] = useState<WorkoutRecord | null>(null)
   const [dataReady, setDataReady] = useState(false)
   const [workoutWriteAvailable, setWorkoutWriteAvailable] = useState(false)
   const [timerNotice, setTimerNotice] = useState<string | null>(null)
@@ -230,6 +224,7 @@ function App() {
         }
       })
       if (dataRef.current.history.some((item) => item.id === record.id)) {
+        setCompletedWorkout(record)
         void playSound(leveledUp ? 'levelUp' : 'finish')
       }
     } catch {
@@ -384,7 +379,7 @@ function App() {
           aria-label="HUSSHUSS home"
         >
           <BrandMark />
-          <span>HUSS<span className="brand-light">HUSS</span></span>
+          <BrandWordmark />
         </a>
 
         <div className="sidebar-label">YOUR SPACE</div>
@@ -419,11 +414,11 @@ function App() {
         <header className="topbar">
           <div className="mobile-brand">
             <BrandMark />
-            <span>HUSS<span className="brand-light">HUSS</span></span>
+            <BrandWordmark />
           </div>
           <div className="topbar-date"><span className="status-dot" /> {dateLabel}</div>
           <div className="topbar-profile" aria-label="HUSSHUSS profile">
-            <span>H</span>
+            <BrandMark variant="avatar" />
           </div>
         </header>
 
@@ -546,6 +541,43 @@ function App() {
             </div>
           )}
           {activeTab === 'body' && <BodyMeasurements />}
+          {completedWorkout && (
+            <section className="workout-completion">
+              <div className="completion-topline">
+                <span className="eyebrow">HUSHHUSS // SESSION CLEARED</span>
+                <span className="completion-status">COMPLETE</span>
+              </div>
+
+              <div className="completion-content">
+                <div className="completion-copy">
+                  <span className="eyebrow">ANOTHER ONE IN THE BOOKS</span>
+                  <h1>SESSION<br />CLEARED.</h1>
+                  <p>
+                    {completedWorkout.workoutName} day completed.
+                    You showed up and put in the work.
+                  </p>
+                  <div className="completion-stats">
+                    <span>WORKOUT SAVED</span>
+                    <span>PROGRESS UPDATED</span>
+                    <span>ROTATION ADVANCED</span>
+                  </div>
+                  <button
+                    className="button-primary"
+                    onClick={() => {
+                      setCompletedWorkout(null)
+                      setActiveTab('overview')
+                    }}
+                  >
+                    Back to overview <span aria-hidden="true">→</span>
+                  </button>
+                </div>
+
+                <div className="completion-mascot">
+                  <img src={mascots.workout} alt="SpongeBob after completing a workout" />
+                </div>
+              </div>
+            </section>
+          )}
         </main>
       </div>
 
@@ -631,7 +663,6 @@ function Overview({
       <XpCard history={history} />
 
       <section className={`hero-card ${dayStatus === 'recovery' ? 'recovery-hero' : ''}`}>
-        <div className="hero-glow" />
         <div className="hero-content">
           <div className="hero-kicker">
             <span className="hero-kicker-dot" />
@@ -676,12 +707,10 @@ function Overview({
             </button>
           )}
         </div>
-        <div className="hero-visual" aria-hidden="true">
-          <div className="orbit orbit-one" />
-          <div className="orbit orbit-two" />
-          <div className="orbit-core"><BrandMark /></div>
-          <span className="orbit-label orbit-label-top">{dayStatus === 'recovery' ? 'REST' : 'MOVE'}</span>
-          <span className="orbit-label orbit-label-bottom">{dayStatus === 'recovery' ? 'RESET' : 'RECOVER'}</span>
+        <div className="hero-campaign-mark" aria-hidden="true">
+          <span className="campaign-mark-top">HUSHHUSS · FIELD NOTES</span>
+          <BrandMark variant="hero" />
+          <span className="campaign-mark-bottom">TRAIN WITH INTENTION</span>
         </div>
         <div className="hero-foot">
           <span><Icon name="clock" size={15} /> {dayStatus === 'recovery' ? 'No schedule to catch up on' : workout.duration}</span>
