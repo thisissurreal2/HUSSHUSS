@@ -11,6 +11,13 @@ import { PersonalInsights } from './PersonalInsights'
 import { XpCard } from './xpCard'
 import { didWorkoutLevelUp } from './xp'
 import { isSoundEnabled, playSound, unlockSound } from './sound'
+import {
+  cancelRestPush,
+  enablePushNotifications,
+  hasPushRegistration,
+  registerPushServiceWorker,
+  scheduleRestPush,
+} from './pushNotifications'
 import { BackupRecovery } from './BackupRecovery'
 import { readMeasurementData } from './measurementStorage'
 import { readAthleticData } from './athleticStorage'
@@ -26,7 +33,13 @@ import {
 } from './workoutStorage'
 import { getLowerBodyExercise, getWorkout, workouts, type Workout, type WorkoutId } from './workouts'
 import { ExtrasPage } from './ExtrasPage'
-import { getExtraRecommendation, extraCategories, getCategoryExercises, type ExtraCategoryId, type ExtraSessionRecord } from './extras'
+import {
+  getExtraRecommendation,
+  extraCategories,
+  getCategoryExercises,
+  type ExtraCategoryId,
+  type ExtraSessionRecord,
+} from './extras'
 import './App.css'
 
 type IconName =
@@ -102,21 +115,31 @@ function App() {
   const [dataReady, setDataReady] = useState(false)
   const [workoutWriteAvailable, setWorkoutWriteAvailable] = useState(false)
   const [timerNotice, setTimerNotice] = useState<string | null>(null)
-  const [notificationPermission, setNotificationPermission] = useState<NotificationPermission | 'unsupported'>(
+
+  const [notificationPermission, setNotificationPermission] = useState<
+    NotificationPermission | 'unsupported'
+  >(
     typeof Notification === 'undefined' ? 'unsupported' : Notification.permission,
   )
+
+  const [pushConfigured, setPushConfigured] = useState(() => hasPushRegistration())
+
   const completedTimerRef = useRef<number | null>(null)
   const timerWarningRef = useRef<string | null>(null)
   const finishingWorkoutRef = useRef(false)
+
   const [now] = useState(() => new Date())
+
   const workout = data.currentWorkout
     ? data.currentWorkout.template
     : workouts[data.rotationIndex]
+
   const dateLabel = new Intl.DateTimeFormat('en', {
     weekday: 'long',
     month: 'long',
     day: 'numeric',
   }).format(now)
+
   const greeting = now.getHours() < 12
     ? 'Good morning.'
     : now.getHours() < 18
@@ -125,94 +148,177 @@ function App() {
 
   useEffect(() => {
     let active = true
-    void Promise.all([readAppData(), readMeasurementData(), readAthleticData()])
+
+    void Promise.all([
+      readAppData(),
+      readMeasurementData(),
+      readAthleticData(),
+    ])
       .then(([workoutsResult, measurementsResult, athleticResult]) => {
         if (!active) return
+
         dataRef.current = workoutsResult.data
         setData(workoutsResult.data)
         setWorkoutWriteAvailable(workoutsResult.usable)
+
         const errors = [
           workoutsResult.error,
           measurementsResult.error,
           athleticResult.error,
         ].filter((error): error is string => error !== null)
+
         setStorageError(errors.length > 0 ? errors.join(' ') : null)
         setDataReady(true)
       })
       .catch((error: unknown) => {
         if (active) {
-          setStorageError(`Local IndexedDB could not be initialized: ${error instanceof Error ? error.message : 'unknown error'}`)
+          setStorageError(
+            `Local IndexedDB could not be initialized: ${
+              error instanceof Error ? error.message : 'unknown error'
+            }`,
+          )
           setWorkoutWriteAvailable(false)
           setDataReady(true)
         }
       })
-    return () => { active = false }
+
+    return () => {
+      active = false
+    }
+  }, [])
+
+  useEffect(() => {
+    void registerPushServiceWorker().catch((error: unknown) => {
+      setTimerNotice(
+        error instanceof Error
+          ? error.message
+          : 'Background notification setup is unavailable.',
+      )
+    })
   }, [])
 
   const updateData = useCallback((change: (current: AppData) => AppData) => {
     if (!dataReady || !workoutWriteAvailable) return
+
     const current = dataRef.current
     const next = change(current)
+
     if (next === current) return
 
     dataRef.current = next
     setData(next)
+
     void writeAppData(next)
-      .then(() => setStorageError((error) => error?.startsWith('Workout data could not be saved') ? null : error))
+      .then(() => {
+        setStorageError((error) =>
+          error?.startsWith('Workout data could not be saved') ? null : error,
+        )
+      })
       .catch((error: unknown) => {
-        setStorageError(`Workout data could not be saved to IndexedDB: ${error instanceof Error ? error.message : 'unknown error'}`)
+        setStorageError(
+          `Workout data could not be saved to IndexedDB: ${
+            error instanceof Error ? error.message : 'unknown error'
+          }`,
+        )
       })
   }, [dataReady, workoutWriteAvailable])
 
   function startWorkout() {
     const current = dataRef.current
+
     if (current.currentWorkout) {
       setActiveTab('overview')
-      window.requestAnimationFrame(() => document.getElementById('active-workout')?.scrollIntoView({ behavior: 'smooth' }))
+      window.requestAnimationFrame(() =>
+        document.getElementById('active-workout')?.scrollIntoView({
+          behavior: 'smooth',
+        }),
+      )
       return
     }
+
     const nextWorkoutId: WorkoutId = workouts[current.rotationIndex].id
+
     updateData((latest) => ({
       ...latest,
-      currentWorkout: createActiveWorkout(nextWorkoutId, Date.now(), latest.history),
+      currentWorkout: createActiveWorkout(
+        nextWorkoutId,
+        Date.now(),
+        latest.history,
+      ),
       recoverySelected: false,
     }))
+
     setActiveTab('overview')
-    window.requestAnimationFrame(() => document.getElementById('active-workout')?.scrollIntoView({ behavior: 'smooth' }))
+
+    window.requestAnimationFrame(() =>
+      document.getElementById('active-workout')?.scrollIntoView({
+        behavior: 'smooth',
+      }),
+    )
   }
 
-  function updateCurrentWorkout(change: (current: ActiveWorkout) => ActiveWorkout) {
-    updateData((current) => current.currentWorkout
-      ? { ...current, currentWorkout: change(current.currentWorkout) }
-      : current)
+  function updateCurrentWorkout(
+    change: (current: ActiveWorkout) => ActiveWorkout,
+  ) {
+    updateData((current) =>
+      current.currentWorkout
+        ? { ...current, currentWorkout: change(current.currentWorkout) }
+        : current,
+    )
   }
 
   function cancelWorkout(selectRecovery = false) {
     const current = dataRef.current.currentWorkout
     if (!current) return
+
     const name = getWorkout(current.workoutId).name
-    const recoveryMessage = selectRecovery ? ' Today will be marked as a recovery day.' : ''
-    if (!window.confirm(`Cancel this ${name} workout? It will not be added to history, and you can start it again later.${recoveryMessage}`)) return
-    updateData((latest) => latest.currentWorkout?.id !== current.id
-      ? latest
-      : {
-          ...latest,
-          currentWorkout: null,
-          recoverySelected: selectRecovery,
-          timerRunning: false,
-          timerDeadline: null,
-          timerRemainingSeconds: latest.restDurationSeconds,
-        })
+    const recoveryMessage = selectRecovery
+      ? ' Today will be marked as a recovery day.'
+      : ''
+
+    if (
+      !window.confirm(
+        `Cancel this ${name} workout? It will not be added to history, and you can start it again later.${recoveryMessage}`,
+      )
+    ) {
+      return
+    }
+
+    updateData((latest) =>
+      latest.currentWorkout?.id !== current.id
+        ? latest
+        : {
+            ...latest,
+            currentWorkout: null,
+            recoverySelected: selectRecovery,
+            timerRunning: false,
+            timerDeadline: null,
+            timerRemainingSeconds: latest.restDurationSeconds,
+          },
+    )
   }
 
   async function finishWorkout() {
     const current = dataRef.current.currentWorkout
-    if (!current || current.exercises.some((exercise) => !exercise.completed) || finishingWorkoutRef.current) return
-    if (dataRef.current.history.some((record) => record.id === current.id)) return
+
+    if (
+      !current ||
+      current.exercises.some((exercise) => !exercise.completed) ||
+      finishingWorkoutRef.current
+    ) {
+      return
+    }
+
+    if (dataRef.current.history.some((record) => record.id === current.id)) {
+      return
+    }
+
     finishingWorkoutRef.current = true
     const previous = dataRef.current
+
     try {
       const record = createWorkoutRecord(current)
+
       const next: AppData = {
         ...previous,
         rotationIndex: (previous.rotationIndex + 1) % workouts.length,
@@ -223,16 +329,32 @@ function App() {
         timerDeadline: null,
         timerRemainingSeconds: previous.restDurationSeconds,
       }
+
       await writeAppData(next)
+
       dataRef.current = next
       setData(next)
       setStorageError(null)
       setCompletedWorkout(record)
-      void playSound(didWorkoutLevelUp(previous.history, record, previous.extrasSessions ?? []) ? 'levelUp' : 'finish')
+
+      void playSound(
+        didWorkoutLevelUp(
+          previous.history,
+          record,
+          previous.extrasSessions ?? [],
+        )
+          ? 'levelUp'
+          : 'finish',
+      )
     } catch (error) {
       dataRef.current = previous
       setData(previous)
-      setStorageError(`The workout could not be completed and saved. Your current session is still available to resume. ${error instanceof Error ? error.message : ''}`)
+
+      setStorageError(
+        `The workout could not be completed and saved. Your current session is still available to resume. ${
+          error instanceof Error ? error.message : ''
+        }`,
+      )
     } finally {
       finishingWorkoutRef.current = false
     }
@@ -240,18 +362,34 @@ function App() {
 
   async function saveExtraSession(session: ExtraSessionRecord) {
     const current = dataRef.current
-    if ((current.extrasSessions ?? []).some((item) => item.id === session.id)) return
-    const next = { ...current, extrasSessions: [...(current.extrasSessions ?? []), session] }
+
+    if (
+      (current.extrasSessions ?? []).some((item) => item.id === session.id)
+    ) {
+      return
+    }
+
+    const next = {
+      ...current,
+      extrasSessions: [...(current.extrasSessions ?? []), session],
+    }
+
     await writeAppData(next)
+
     dataRef.current = next
     setData(next)
     setStorageError(null)
+
     void playSound('finish')
   }
 
   function selectRestDuration(seconds: number) {
+    void cancelRestPush().catch(() => undefined)
+
     const safeSeconds = Math.max(15, Math.min(600, Math.round(seconds)))
+
     timerWarningRef.current = null
+
     updateData((current) => ({
       ...current,
       restDurationSeconds: safeSeconds,
@@ -259,68 +397,136 @@ function App() {
       timerDeadline: null,
       timerRunning: false,
     }))
+
     setTimerNotice(null)
   }
 
   function adjustRestTimer(deltaSeconds: number) {
     const current = dataRef.current
-    const remaining = current.timerRunning && current.timerDeadline !== null
-      ? Math.max(0, Math.ceil((current.timerDeadline - Date.now()) / 1000))
-      : current.timerRemainingSeconds
-    const nextRemaining = Math.max(0, Math.min(600, remaining + deltaSeconds))
-    const nextDeadline = current.timerRunning ? Date.now() + nextRemaining * 1000 : null
+
+    const remaining =
+      current.timerRunning && current.timerDeadline !== null
+        ? Math.max(
+            0,
+            Math.ceil((current.timerDeadline - Date.now()) / 1000),
+          )
+        : current.timerRemainingSeconds
+
+    const nextRemaining = Math.max(
+      0,
+      Math.min(600, remaining + deltaSeconds),
+    )
+
+    const nextDeadline =
+      current.timerRunning && nextRemaining > 0
+        ? Date.now() + nextRemaining * 1000
+        : null
+
     timerWarningRef.current = null
+
     updateData((latest) => ({
       ...latest,
       timerRemainingSeconds: nextRemaining,
       timerDeadline: nextDeadline,
       timerRunning: latest.timerRunning && nextRemaining > 0,
     }))
+
+    if (nextDeadline !== null) {
+      void scheduleRestPush(nextDeadline).catch((error: unknown) => {
+        setPushConfigured(false)
+        setTimerNotice(
+          error instanceof Error
+            ? error.message
+            : 'Background alert could not be updated.',
+        )
+      })
+    } else {
+      void cancelRestPush().catch(() => undefined)
+    }
   }
 
   function skipRestTimer() {
+    void cancelRestPush().catch(() => undefined)
+
     completedTimerRef.current = null
     timerWarningRef.current = null
+
     updateData((current) => ({
       ...current,
       timerRemainingSeconds: 0,
       timerDeadline: null,
       timerRunning: false,
     }))
+
     setTimerNotice('Rest skipped. Continue when you’re ready.')
   }
 
-  function updateTimerPreference(key: 'timerAutoStart' | 'timerCountdownWarnings' | 'timerVibration', value: boolean) {
-    updateData((current) => ({ ...current, [key]: value }))
+  function updateTimerPreference(
+    key: 'timerAutoStart' | 'timerCountdownWarnings' | 'timerVibration',
+    value: boolean,
+  ) {
+    updateData((current) => ({
+      ...current,
+      [key]: value,
+    }))
   }
 
   function startRestTimer(restartFullDuration = false) {
     const current = dataRef.current
-    const remaining = restartFullDuration ? current.restDurationSeconds : current.timerRemainingSeconds || current.restDurationSeconds
+
+    const remaining = restartFullDuration
+      ? current.restDurationSeconds
+      : current.timerRemainingSeconds || current.restDurationSeconds
+
     const deadline = Date.now() + remaining * 1000
+
     completedTimerRef.current = null
     timerWarningRef.current = null
+
     updateData((latest) => ({
       ...latest,
       timerRemainingSeconds: remaining,
       timerDeadline: deadline,
       timerRunning: true,
     }))
+
     setTimerNotice(null)
+
+    if (pushConfigured) {
+      void scheduleRestPush(deadline).catch((error: unknown) => {
+        setPushConfigured(false)
+        setTimerNotice(
+          error instanceof Error
+            ? error.message
+            : 'Background alert could not be scheduled.',
+        )
+      })
+    }
+
     if (isSoundEnabled()) {
       void unlockSound().then((unlocked) => {
         if (!unlocked && isSoundEnabled()) {
-          setTimerNotice('The timer is running. Browser sound is unavailable; keep the timer visible for its on-screen alert.')
+          setTimerNotice(
+            'The timer is running. Browser sound is unavailable; keep the timer visible for its on-screen alert.',
+          )
         }
       })
     }
   }
 
   function pauseRestTimer() {
+    void cancelRestPush().catch(() => undefined)
+
     const current = dataRef.current
-    const remaining = current.timerDeadline === null
-      ? current.timerRemainingSeconds
-      : Math.max(0, Math.ceil((current.timerDeadline - Date.now()) / 1000))
+
+    const remaining =
+      current.timerDeadline === null
+        ? current.timerRemainingSeconds
+        : Math.max(
+            0,
+            Math.ceil((current.timerDeadline - Date.now()) / 1000),
+          )
+
     updateData((latest) => ({
       ...latest,
       timerRemainingSeconds: remaining,
@@ -330,84 +536,179 @@ function App() {
   }
 
   function resetRestTimer() {
+    void cancelRestPush().catch(() => undefined)
+
     completedTimerRef.current = null
     timerWarningRef.current = null
+
     updateData((current) => ({
       ...current,
       timerRemainingSeconds: current.restDurationSeconds,
       timerDeadline: null,
       timerRunning: false,
     }))
+
     setTimerNotice(null)
   }
 
-  async function alertRestTimerFinished() {
-    if (dataRef.current.timerVibration && typeof navigator !== 'undefined' && 'vibrate' in navigator) navigator.vibrate?.([180, 90, 180])
+  const alertRestTimerFinished = useCallback(async () => {
+    if (
+      dataRef.current.timerVibration &&
+      typeof navigator !== 'undefined' &&
+      'vibrate' in navigator
+    ) {
+      navigator.vibrate?.([180, 90, 180])
+    }
+
     let notificationShown = false
-    if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+
+    if (
+      typeof Notification !== 'undefined' &&
+      Notification.permission === 'granted'
+    ) {
       try {
-        new Notification('Rest timer complete', { body: 'Take the next set when you’re ready.' })
+        if ('serviceWorker' in navigator) {
+          const registration = await navigator.serviceWorker.ready
+
+          await registration.showNotification('REST COMPLETE', {
+            body: 'Your rest is over. Time for the next set.',
+            icon: '/icon-192.png',
+            tag: 'husshuss-rest-timer',
+          })
+        } else {
+          new Notification('REST COMPLETE', {
+            body: 'Your rest is over. Time for the next set.',
+          })
+        }
+
         notificationShown = true
       } catch {
-        setTimerNotice('Rest complete. Take the next set when you’re ready.')
+        setTimerNotice(
+          'Rest complete. Take the next set when you’re ready.',
+        )
       }
     }
 
     if (!(await playSound('timer')) && !notificationShown) {
-      setTimerNotice('Rest complete. Take the next set when you’re ready.')
+      setTimerNotice(
+        'Rest complete. Take the next set when you’re ready.',
+      )
     }
-  }
+  }, [])
 
   async function enableTimerNotifications() {
     if (typeof Notification === 'undefined') {
       setNotificationPermission('unsupported')
-      setTimerNotice('Notifications are not supported here. The timer will use on-screen and sound alerts where available.')
+      setTimerNotice('Notifications are not supported in this browser.')
       return
     }
+
     try {
-      const permission = await Notification.requestPermission()
-      setNotificationPermission(permission)
-      setTimerNotice(permission === 'granted'
-        ? 'Timer notifications enabled.'
-        : 'Notifications were not enabled. The timer can still use sound and on-screen alerts.')
-    } catch {
-      setTimerNotice('Notification permission could not be requested. The timer can still use sound and on-screen alerts.')
+      await enablePushNotifications()
+
+      setNotificationPermission(Notification.permission)
+      setPushConfigured(true)
+
+      const current = dataRef.current
+
+      if (current.timerRunning && current.timerDeadline !== null) {
+        await scheduleRestPush(current.timerDeadline)
+      }
+
+      setTimerNotice(
+        'Background alerts enabled. You can leave HUSHHUSS while resting.',
+      )
+    } catch (error) {
+      setPushConfigured(false)
+      setNotificationPermission(Notification.permission)
+
+      setTimerNotice(
+        error instanceof Error
+          ? error.message
+          : 'Background notifications could not be enabled.',
+      )
     }
   }
 
   useEffect(() => {
     if (!data.timerRunning || data.timerDeadline === null) return
+
     const deadline = data.timerDeadline
+
     const updateRemaining = () => {
       const current = dataRef.current
-      if (!current.timerRunning || current.timerDeadline !== deadline) return
-      const remaining = Math.max(0, Math.ceil((deadline - Date.now()) / 1000))
+
+      if (!current.timerRunning || current.timerDeadline !== deadline) {
+        return
+      }
+
+      const remaining = Math.max(
+        0,
+        Math.ceil((deadline - Date.now()) / 1000),
+      )
+
       if (remaining === 0) {
-        updateData((latest) => latest.timerDeadline !== deadline
-          ? latest
-          : { ...latest, timerRunning: false, timerDeadline: null, timerRemainingSeconds: 0 })
+        updateData((latest) =>
+          latest.timerDeadline !== deadline
+            ? latest
+            : {
+                ...latest,
+                timerRunning: false,
+                timerDeadline: null,
+                timerRemainingSeconds: 0,
+              },
+        )
+
         if (completedTimerRef.current !== deadline) {
           completedTimerRef.current = deadline
+          void cancelRestPush().catch(() => undefined)
           void alertRestTimerFinished()
         }
       } else if (remaining !== current.timerRemainingSeconds) {
-        updateData((latest) => latest.timerDeadline !== deadline
-          ? latest
-          : { ...latest, timerRemainingSeconds: remaining })
-        if (current.timerCountdownWarnings && [10, 5, 3].includes(remaining)) {
+        updateData((latest) =>
+          latest.timerDeadline !== deadline
+            ? latest
+            : {
+                ...latest,
+                timerRemainingSeconds: remaining,
+              },
+        )
+
+        if (
+          current.timerCountdownWarnings &&
+          [10, 5, 3].includes(remaining)
+        ) {
           const warningKey = `${deadline}:${remaining}`
+
           if (timerWarningRef.current !== warningKey) {
             timerWarningRef.current = warningKey
-            if (current.timerVibration && typeof navigator !== 'undefined' && 'vibrate' in navigator) navigator.vibrate?.(55)
+
+            if (
+              current.timerVibration &&
+              typeof navigator !== 'undefined' &&
+              'vibrate' in navigator
+            ) {
+              navigator.vibrate?.(55)
+            }
+
             void playSound('timer')
           }
         }
       }
     }
+
     updateRemaining()
+
     const intervalId = window.setInterval(updateRemaining, 250)
+
     return () => window.clearInterval(intervalId)
-  }, [data.timerDeadline, data.timerRunning, updateData])
+  }, [
+    data.timerDeadline,
+    data.timerRunning,
+    pushConfigured,
+    updateData,
+    alertRestTimerFinished,
+  ])
 
   function deleteHistoryRecord(recordId: string) {
     updateData((current) => ({
@@ -417,14 +718,19 @@ function App() {
   }
 
   function goToTab(tab: Tab) {
-    if (tab !== 'extras') setExtraLaunchCategory(null)
+    if (tab !== 'extras') {
+      setExtraLaunchCategory(null)
+    }
+
     setActiveTab(tab)
   }
 
   if (!dataReady) {
     return (
       <div className="app-shell min-h-screen">
-        <main className="main-content" role="status">Opening your local HUSSHUSS database…</main>
+        <main className="main-content" role="status">
+          Opening your local HUSHHUSS database…
+        </main>
       </div>
     )
   }
@@ -439,13 +745,14 @@ function App() {
             event.preventDefault()
             goToTab('overview')
           }}
-          aria-label="HUSSHUSS home"
+          aria-label="HUSHHUSS home"
         >
           <BrandMark />
           <BrandWordmark />
         </a>
 
         <div className="sidebar-label">YOUR SPACE</div>
+
         <nav className="side-nav" aria-label="Main navigation">
           {navigation.map((item) => (
             <button
@@ -456,17 +763,23 @@ function App() {
             >
               <Icon name={item.icon} size={19} />
               <span>{item.label}</span>
-              {item.id === 'rotation' && <span className="nav-count">03</span>}
+              {item.id === 'rotation' && (
+                <span className="nav-count">03</span>
+              )}
             </button>
           ))}
         </nav>
 
         <div className="sidebar-spacer" />
+
         <div className="sidebar-note">
-          <div className="note-icon"><Icon name="moon" size={17} /></div>
+          <div className="note-icon">
+            <Icon name="moon" size={17} />
+          </div>
           <p>Rest is part of the work.</p>
           <span>Take the day you need.</span>
         </div>
+
         <div className="sidebar-footer">
           <span className="status-dot" />
           PHASE 3.5 · ON THIS DEVICE
@@ -479,8 +792,12 @@ function App() {
             <BrandMark />
             <BrandWordmark />
           </div>
-          <div className="topbar-date"><span className="status-dot" /> {dateLabel}</div>
-          <div className="topbar-profile" aria-label="HUSSHUSS profile">
+
+          <div className="topbar-date">
+            <span className="status-dot" /> {dateLabel}
+          </div>
+
+          <div className="topbar-profile" aria-label="HUSHHUSS profile">
             <BrandMark variant="avatar" />
           </div>
         </header>
@@ -496,9 +813,13 @@ function App() {
               history={data.history}
               extras={data.extrasSessions ?? []}
               onStart={startWorkout}
-              onRecover={() => updateData((current) => current.currentWorkout
-                ? current
-                : { ...current, recoverySelected: true })}
+              onRecover={() =>
+                updateData((current) =>
+                  current.currentWorkout
+                    ? current
+                    : { ...current, recoverySelected: true },
+                )
+              }
               onResume={startWorkout}
               onCancel={() => cancelWorkout()}
               onCancelToRecover={() => cancelWorkout(true)}
@@ -511,6 +832,7 @@ function App() {
                 deadline: data.timerDeadline,
                 notificationAvailable: typeof Notification !== 'undefined',
                 notificationPermission,
+                pushConfigured,
                 notice: timerNotice,
                 onSelectDuration: selectRestDuration,
                 onStart: startRestTimer,
@@ -521,28 +843,101 @@ function App() {
                 autoStartOnSet: data.timerAutoStart ?? true,
                 countdownWarnings: data.timerCountdownWarnings ?? true,
                 vibrationEnabled: data.timerVibration ?? false,
-                onToggleAutoStart: (value: boolean) => updateTimerPreference('timerAutoStart', value),
-                onToggleCountdownWarnings: (value: boolean) => updateTimerPreference('timerCountdownWarnings', value),
-                onToggleVibration: (value: boolean) => updateTimerPreference('timerVibration', value),
+                onToggleAutoStart: (value: boolean) =>
+                  updateTimerPreference('timerAutoStart', value),
+                onToggleCountdownWarnings: (value: boolean) =>
+                  updateTimerPreference('timerCountdownWarnings', value),
+                onToggleVibration: (value: boolean) =>
+                  updateTimerPreference('timerVibration', value),
                 onWorkUnitComplete: () => {
-                  if (dataRef.current.timerAutoStart ?? true) startRestTimer(true)
+                  if (dataRef.current.timerAutoStart ?? true) {
+                    startRestTimer(true)
+                  }
                 },
-                onEnableNotifications: () => { void enableTimerNotifications() },
+                onEnableNotifications: () => {
+                  void enableTimerNotifications()
+                },
               }}
               onOpenRotation={() => goToTab('rotation')}
             />
           )}
+
           {activeTab === 'rotation' && (
             <RotationPage
               rotationIndex={data.rotationIndex}
               onStart={startWorkout}
-              onOpenExtras={() => { setExtraLaunchCategory(null); setActiveTab('extras') }}
+              onOpenExtras={() => {
+                setExtraLaunchCategory(null)
+                setActiveTab('extras')
+              }}
             />
           )}
-          {activeTab === 'extras' && <ExtrasPage initialCategory={extraLaunchCategory} sessions={data.extrasSessions ?? []} favourites={data.extrasFavourites ?? []} onToggleFavourite={(id: string) => updateData((current) => ({ ...current, extrasFavourites: (current.extrasFavourites ?? []).includes(id) ? (current.extrasFavourites ?? []).filter((item) => item !== id) : [...(current.extrasFavourites ?? []), id] }))} timer={{ durationSeconds: data.restDurationSeconds, remainingSeconds: data.timerRemainingSeconds, running: data.timerRunning, deadline: data.timerDeadline, notificationAvailable: typeof Notification !== 'undefined', notificationPermission, notice: timerNotice, onSelectDuration: selectRestDuration, onStart: startRestTimer, onPause: pauseRestTimer, onReset: resetRestTimer, onAdjust: adjustRestTimer, onSkip: skipRestTimer, autoStartOnSet: data.timerAutoStart ?? true, countdownWarnings: data.timerCountdownWarnings ?? true, vibrationEnabled: data.timerVibration ?? false, onToggleAutoStart: (value: boolean) => updateTimerPreference('timerAutoStart', value), onToggleCountdownWarnings: (value: boolean) => updateTimerPreference('timerCountdownWarnings', value), onToggleVibration: (value: boolean) => updateTimerPreference('timerVibration', value), onWorkUnitComplete: () => { if (dataRef.current.timerAutoStart ?? true) startRestTimer(true) }, onEnableNotifications: () => { void enableTimerNotifications() } }} onSave={saveExtraSession} onBack={() => { setExtraLaunchCategory(null); setActiveTab('rotation') }} />}
-          {activeTab === 'history' && (
-            <HistoryPage history={data.history} onDelete={deleteHistoryRecord} />
+
+          {activeTab === 'extras' && (
+            <ExtrasPage
+              initialCategory={extraLaunchCategory}
+              sessions={data.extrasSessions ?? []}
+              favourites={data.extrasFavourites ?? []}
+              onToggleFavourite={(id: string) =>
+                updateData((current) => ({
+                  ...current,
+                  extrasFavourites: (
+                    current.extrasFavourites ?? []
+                  ).includes(id)
+                    ? (current.extrasFavourites ?? []).filter(
+                        (item) => item !== id,
+                      )
+                    : [...(current.extrasFavourites ?? []), id],
+                }))
+              }
+              timer={{
+                durationSeconds: data.restDurationSeconds,
+                remainingSeconds: data.timerRemainingSeconds,
+                running: data.timerRunning,
+                deadline: data.timerDeadline,
+                notificationAvailable: typeof Notification !== 'undefined',
+                notificationPermission,
+                pushConfigured,
+                notice: timerNotice,
+                onSelectDuration: selectRestDuration,
+                onStart: startRestTimer,
+                onPause: pauseRestTimer,
+                onReset: resetRestTimer,
+                onAdjust: adjustRestTimer,
+                onSkip: skipRestTimer,
+                autoStartOnSet: data.timerAutoStart ?? true,
+                countdownWarnings: data.timerCountdownWarnings ?? true,
+                vibrationEnabled: data.timerVibration ?? false,
+                onToggleAutoStart: (value: boolean) =>
+                  updateTimerPreference('timerAutoStart', value),
+                onToggleCountdownWarnings: (value: boolean) =>
+                  updateTimerPreference('timerCountdownWarnings', value),
+                onToggleVibration: (value: boolean) =>
+                  updateTimerPreference('timerVibration', value),
+                onWorkUnitComplete: () => {
+                  if (dataRef.current.timerAutoStart ?? true) {
+                    startRestTimer(true)
+                  }
+                },
+                onEnableNotifications: () => {
+                  void enableTimerNotifications()
+                },
+              }}
+              onSave={saveExtraSession}
+              onBack={() => {
+                setExtraLaunchCategory(null)
+                setActiveTab('rotation')
+              }}
+            />
           )}
+
+          {activeTab === 'history' && (
+            <HistoryPage
+              history={data.history}
+              onDelete={deleteHistoryRecord}
+            />
+          )}
+
           {activeTab === 'progress' && (
             <div className="progress-tab-content">
               <div className="progress-view-tabs" aria-label="Progress views">
@@ -554,6 +949,7 @@ function App() {
                 >
                   Performance dashboard
                 </button>
+
                 <button
                   type="button"
                   className={progressView === 'strength' ? 'selected' : ''}
@@ -562,6 +958,7 @@ function App() {
                 >
                   Exercise progression
                 </button>
+
                 <button
                   type="button"
                   className={progressView === 'muscle' ? 'selected' : ''}
@@ -570,6 +967,7 @@ function App() {
                 >
                   Muscle balance
                 </button>
+
                 <button
                   type="button"
                   className={progressView === 'athletic' ? 'selected' : ''}
@@ -578,6 +976,7 @@ function App() {
                 >
                   Athletic development
                 </button>
+
                 <button
                   type="button"
                   className={progressView === 'insights' ? 'selected' : ''}
@@ -586,15 +985,17 @@ function App() {
                 >
                   Personal insights
                 </button>
+
                 <button
                   type="button"
                   className={progressView === 'backup' ? 'selected' : ''}
                   aria-pressed={progressView === 'backup'}
                   onClick={() => setProgressView('backup')}
                 >
-                  Backup & sync
+                  Backup &amp; sync
                 </button>
               </div>
+
               <div hidden={progressView !== 'dashboard'}>
                 <PerformanceDashboard
                   history={data.history}
@@ -602,22 +1003,36 @@ function App() {
                   onOpenStrengthProgress={() => setProgressView('strength')}
                 />
               </div>
+
               <div hidden={progressView !== 'strength'}>
                 <StrengthProgressPage history={data.history} />
               </div>
-              {progressView === 'muscle' && <MuscleBalance history={data.history} extras={data.extrasSessions ?? []} />}
+
+              {progressView === 'muscle' && (
+                <MuscleBalance
+                  history={data.history}
+                  extras={data.extrasSessions ?? []}
+                />
+              )}
+
               <div hidden={progressView !== 'athletic'}>
                 <AthleticDevelopment />
               </div>
+
               <div hidden={progressView !== 'insights'}>
                 <PersonalInsights history={data.history} />
               </div>
+
               <div hidden={progressView !== 'backup'}>
-                <BackupRecovery onRestored={() => window.location.reload()} />
+                <BackupRecovery
+                  onRestored={() => window.location.reload()}
+                />
               </div>
             </div>
           )}
+
           {activeTab === 'body' && <BodyMeasurements />}
+
           {completedWorkout && (
             <section className="workout-completion">
               <div className="completion-topline">
@@ -629,15 +1044,18 @@ function App() {
                 <div className="completion-copy">
                   <span className="eyebrow">ANOTHER ONE IN THE BOOKS</span>
                   <h1>SESSION<br />CLEARED.</h1>
+
                   <p>
                     {completedWorkout.workoutName} day completed.
                     You showed up and put in the work.
                   </p>
+
                   <div className="completion-stats">
                     <span>WORKOUT SAVED</span>
                     <span>PROGRESS UPDATED</span>
                     <span>ROTATION ADVANCED</span>
                   </div>
+
                   <button
                     className="button-primary"
                     onClick={() => {
@@ -650,12 +1068,67 @@ function App() {
                 </div>
 
                 <div className="completion-mascot">
-                  <img src={mascots.workout} alt="SpongeBob after completing a workout" />
+                  <img
+                    src={mascots.workout}
+                    alt="SpongeBob after completing a workout"
+                  />
                 </div>
               </div>
+
               <section className="extras-recommendation">
-                {(() => { const recommendation = getExtraRecommendation(data.history, data.extrasSessions ?? []); const category = extraCategories.find((item) => item.id === recommendation.category)!; return <div><span className="eyebrow">OPTIONAL · ONLY IF YOU FEEL LIKE IT</span><h2>GOT MORE IN THE TANK?</h2><strong>{category.name}</strong><p>{recommendation.reason} {category.duration} · {getCategoryExercises(recommendation.category).length} exercises.</p></div> })()}
-                <div className="extras-recommendation-actions"><button className="button-primary" onClick={() => { setExtraLaunchCategory(getExtraRecommendation(data.history, data.extrasSessions ?? []).category); setCompletedWorkout(null); setActiveTab('extras') }}>START EXTRA SESSION</button><button className="button-secondary" onClick={() => setCompletedWorkout(null)}>NOT TODAY</button></div>
+                {(() => {
+                  const recommendation = getExtraRecommendation(
+                    data.history,
+                    data.extrasSessions ?? [],
+                  )
+
+                  const category = extraCategories.find(
+                    (item) => item.id === recommendation.category,
+                  )!
+
+                  return (
+                    <div>
+                      <span className="eyebrow">
+                        OPTIONAL · ONLY IF YOU FEEL LIKE IT
+                      </span>
+
+                      <h2>GOT MORE IN THE TANK?</h2>
+
+                      <strong>{category.name}</strong>
+
+                      <p>
+                        {recommendation.reason} {category.duration} ·{' '}
+                        {getCategoryExercises(recommendation.category).length}{' '}
+                        exercises.
+                      </p>
+                    </div>
+                  )
+                })()}
+
+                <div className="extras-recommendation-actions">
+                  <button
+                    className="button-primary"
+                    onClick={() => {
+                      setExtraLaunchCategory(
+                        getExtraRecommendation(
+                          data.history,
+                          data.extrasSessions ?? [],
+                        ).category,
+                      )
+                      setCompletedWorkout(null)
+                      setActiveTab('extras')
+                    }}
+                  >
+                    START EXTRA SESSION
+                  </button>
+
+                  <button
+                    className="button-secondary"
+                    onClick={() => setCompletedWorkout(null)}
+                  >
+                    NOT TODAY
+                  </button>
+                </div>
               </section>
             </section>
           )}
@@ -671,23 +1144,32 @@ function App() {
             aria-current={activeTab === item.id ? 'page' : undefined}
           >
             <Icon name={item.icon} size={20} />
-            <span>{item.id === 'overview'
-              ? 'Home'
-              : item.id === 'rotation'
-                ? 'Plan'
-                : item.id === 'history'
-                  ? 'History'
-                : item.id === 'progress'
-                  ? 'Progress'
-                  : 'Body'}</span>
+
+            <span>
+              {item.id === 'overview'
+                ? 'Home'
+                : item.id === 'rotation'
+                  ? 'Plan'
+                  : item.id === 'history'
+                    ? 'History'
+                    : item.id === 'progress'
+                      ? 'Progress'
+                      : 'Body'}
+            </span>
           </button>
         ))}
       </nav>
+
       {storageError && (
         <div className="storage-alert" role="alert">
           <strong>Local data notice</strong>
           <span>{storageError}</span>
-          <button onClick={() => setStorageError(null)} aria-label="Dismiss data notice">Dismiss</button>
+          <button
+            onClick={() => setStorageError(null)}
+            aria-label="Dismiss data notice"
+          >
+            Dismiss
+          </button>
         </div>
       )}
     </div>
@@ -729,7 +1211,12 @@ function Overview({
   timer: RestTimerProps
   onOpenRotation: () => void
 }) {
-  const dayStatus = activeWorkout ? 'active' : recoverySelected ? 'recovery' : 'planned'
+  const dayStatus = activeWorkout
+    ? 'active'
+    : recoverySelected
+      ? 'recovery'
+      : 'planned'
+
   const lowerBodyExercise = getLowerBodyExercise(workout)
 
   return (
@@ -738,23 +1225,34 @@ function Overview({
         <div>
           <div className="eyebrow">A LITTLE BETTER, EVERY SESSION</div>
           <h1>{greeting}</h1>
-          <p className="page-subtitle">Make today’s training work for you.</p>
+          <p className="page-subtitle">
+            Make today’s training work for you.
+          </p>
         </div>
-        <div className="weekly-chip"><Icon name="spark" size={16} /> YOUR PACE, YOURS</div>
+
+        <div className="weekly-chip">
+          <Icon name="spark" size={16} /> YOUR PACE, YOURS
+        </div>
       </div>
 
       <XpCard history={history} extras={extras} />
 
-      <section className={`hero-card ${dayStatus === 'recovery' ? 'recovery-hero' : ''}`}>
+      <section
+        className={`hero-card ${
+          dayStatus === 'recovery' ? 'recovery-hero' : ''
+        }`}
+      >
         <div className="hero-content">
           <div className="hero-kicker">
             <span className="hero-kicker-dot" />
+
             {dayStatus === 'recovery'
               ? 'TODAY · RECOVERY'
               : dayStatus === 'active'
                 ? 'WORKOUT IN PROGRESS'
-                  : 'YOUR NEXT SESSION'}
+                : 'YOUR NEXT SESSION'}
           </div>
+
           <h2>
             {dayStatus === 'recovery'
               ? 'Take the space you need.'
@@ -762,43 +1260,69 @@ function Overview({
                 ? `${workout.name}, in progress.`
                 : `${workout.name}, on your terms.`}
           </h2>
+
           <p>
             {dayStatus === 'recovery'
               ? `Your next session is still ${workout.name}. Pick it up when you feel ready.`
               : dayStatus === 'active'
-                ? `${activeWorkout?.exercises.filter((exercise) => !exercise.completed).length ?? 0} exercises left. Your session is saved on this device.`
+                ? `${
+                    activeWorkout?.exercises.filter(
+                      (exercise) => !exercise.completed,
+                    ).length ?? 0
+                  } exercises left. Your session is saved on this device.`
                 : workout.description}
           </p>
+
           {dayStatus === 'active' ? (
             <button className="button-primary" onClick={onResume}>
               Resume workout <Icon name="arrow" size={17} />
             </button>
           ) : (
             <button className="button-primary" onClick={onStart}>
-              {dayStatus === 'recovery' ? `Start ${workout.name} when ready` : `Start ${workout.name} workout`}
+              {dayStatus === 'recovery'
+                ? `Start ${workout.name} when ready`
+                : `Start ${workout.name} workout`}
               <Icon name="arrow" size={17} />
             </button>
           )}
+
           {dayStatus === 'planned' && (
             <button className="button-text" onClick={onRecover}>
               <Icon name="moon" size={16} /> Make today a recovery day
             </button>
           )}
+
           {dayStatus === 'active' && (
             <button className="button-text" onClick={onCancelToRecover}>
               <Icon name="moon" size={16} /> Cancel and take a recovery day
             </button>
           )}
         </div>
+
         <div className="hero-campaign-mark" aria-hidden="true">
-          <span className="campaign-mark-top">HUSHHUSS · FIELD NOTES</span>
+          <span className="campaign-mark-top">
+            HUSHHUSS · FIELD NOTES
+          </span>
           <BrandMark variant="hero" />
-          <span className="campaign-mark-bottom">TRAIN WITH INTENTION</span>
+          <span className="campaign-mark-bottom">
+            TRAIN WITH INTENTION
+          </span>
         </div>
+
         <div className="hero-foot">
-          <span><Icon name="clock" size={15} /> {dayStatus === 'recovery' ? 'No schedule to catch up on' : workout.duration}</span>
+          <span>
+            <Icon name="clock" size={15} />{' '}
+            {dayStatus === 'recovery'
+              ? 'No schedule to catch up on'
+              : workout.duration}
+          </span>
+
           <span className="hero-foot-divider" />
-          <span><Icon name="target" size={15} /> {dayStatus === 'recovery' ? 'Next up' : workout.focus}</span>
+
+          <span>
+            <Icon name="target" size={15} />{' '}
+            {dayStatus === 'recovery' ? 'Next up' : workout.focus}
+          </span>
         </div>
       </section>
 
@@ -807,6 +1331,7 @@ function Overview({
           <div className="eyebrow">YOUR TRAINING, AT A GLANCE</div>
           <h2>The plan</h2>
         </div>
+
         <button className="text-link" onClick={onOpenRotation}>
           See rotation <Icon name="arrow" size={16} />
         </button>
@@ -816,14 +1341,24 @@ function Overview({
         <section className="panel next-panel">
           <div className="panel-topline">
             <span className="panel-label">UP NEXT</span>
-            <span className="tiny-pill"><span className="status-dot" /> READY WHEN YOU ARE</span>
+
+            <span className="tiny-pill">
+              <span className="status-dot" /> READY WHEN YOU ARE
+            </span>
           </div>
+
           <div className="next-workout-row">
-            <div className="workout-index">{String(workouts.findIndex((item) => item.id === workout.id) + 1).padStart(2, '0')}</div>
+            <div className="workout-index">
+              {String(
+                workouts.findIndex((item) => item.id === workout.id) + 1,
+              ).padStart(2, '0')}
+            </div>
+
             <div className="next-workout-copy">
               <h3>{workout.name}</h3>
               <p>{workout.focus}</p>
             </div>
+
             <button
               className="round-arrow"
               onClick={onStart}
@@ -832,30 +1367,70 @@ function Overview({
               <Icon name="chevron" size={18} />
             </button>
           </div>
+
           <div className="panel-divider" />
+
           <div className="leg-exercise">
-            <span className="leg-icon"><Icon name="activity" size={17} /></span>
-            <div><span className="micro-label">ONE LOWER-BODY MOVEMENT</span><strong>{lowerBodyExercise.name} · {lowerBodyExercise.focus}</strong></div>
+            <span className="leg-icon">
+              <Icon name="activity" size={17} />
+            </span>
+
+            <div>
+              <span className="micro-label">
+                ONE LOWER-BODY MOVEMENT
+              </span>
+              <strong>
+                {lowerBodyExercise.name} · {lowerBodyExercise.focus}
+              </strong>
+            </div>
           </div>
-          <p className="panel-footnote">Lower-body focus changes each session. Keep the effort comfortable; take recovery whenever you need it.</p>
+
+          <p className="panel-footnote">
+            Lower-body focus changes each session. Keep the effort
+            comfortable; take recovery whenever you need it.
+          </p>
         </section>
 
         <section className="panel recovery-panel">
-          <div className="recovery-icon"><Icon name="moon" size={19} /></div>
+          <div className="recovery-icon">
+            <Icon name="moon" size={19} />
+          </div>
+
           <div className="eyebrow">RECOVERY COUNTS</div>
           <h3>No streaks. No pressure.</h3>
-          <p>There’s no daily target to keep up with. Rest days never move your rotation forward.</p>
+
+          <p>
+            There’s no daily target to keep up with. Rest days never move
+            your rotation forward.
+          </p>
+
           <div className="recovery-footer">
-            <span className="recovery-status"><span className="status-dot" /> {dayStatus === 'recovery' ? 'RECOVERY SELECTED' : 'OPTIONAL, ALWAYS'}</span>
-            {dayStatus === 'planned' && <button className="recovery-link" onClick={onRecover}>Choose rest <Icon name="arrow" size={14} /></button>}
+            <span className="recovery-status">
+              <span className="status-dot" />{' '}
+              {dayStatus === 'recovery'
+                ? 'RECOVERY SELECTED'
+                : 'OPTIONAL, ALWAYS'}
+            </span>
+
+            {dayStatus === 'planned' && (
+              <button className="recovery-link" onClick={onRecover}>
+                Choose rest <Icon name="arrow" size={14} />
+              </button>
+            )}
           </div>
         </section>
 
         <section className="panel rhythm-panel">
           <div className="panel-label">YOUR RHYTHM</div>
-          <div className="rhythm-number">{String(completedCount).padStart(2, '0')}</div>
-          <div className="rhythm-caption">completed sessions saved</div>
-          <div className="rhythm-note"><Icon name="spark" size={15} /> Small steps count.</div>
+          <div className="rhythm-number">
+            {String(completedCount).padStart(2, '0')}
+          </div>
+          <div className="rhythm-caption">
+            completed sessions saved
+          </div>
+          <div className="rhythm-note">
+            <Icon name="spark" size={15} /> Small steps count.
+          </div>
         </section>
       </div>
 
@@ -891,42 +1466,109 @@ function RotationPage({
         <div>
           <div className="eyebrow">A FLEXIBLE TRAINING RHYTHM</div>
           <h1>Your rotation.</h1>
-          <p className="page-subtitle">Continue where you left off. No daily schedule required.</p>
+          <p className="page-subtitle">
+            Continue where you left off. No daily schedule required.
+          </p>
         </div>
-        <div className="weekly-chip"><Icon name="moon" size={16} /> REST DAYS ARE BUILT IN</div>
+
+        <div className="weekly-chip">
+          <Icon name="moon" size={16} /> REST DAYS ARE BUILT IN
+        </div>
       </div>
+
       <section className="rotation-intro panel">
-        <div className="rotation-intro-icon"><Icon name="activity" size={21} /></div>
-        <div>
-          <div className="eyebrow">UP NEXT · {String(rotationIndex + 1).padStart(2, '0')} OF 03</div>
-          <h2>{workouts[rotationIndex].name}</h2>
-          <p>The sequence only moves forward when you mark a session complete. A recovery day leaves it right here.</p>
+        <div className="rotation-intro-icon">
+          <Icon name="activity" size={21} />
         </div>
-        <button className="button-primary" onClick={onStart}>Start workout <Icon name="arrow" size={17} /></button>
+
+        <div>
+          <div className="eyebrow">
+            UP NEXT · {String(rotationIndex + 1).padStart(2, '0')} OF 03
+          </div>
+
+          <h2>{workouts[rotationIndex].name}</h2>
+
+          <p>
+            The sequence only moves forward when you mark a session
+            complete. A recovery day leaves it right here.
+          </p>
+        </div>
+
+        <button className="button-primary" onClick={onStart}>
+          Start workout <Icon name="arrow" size={17} />
+        </button>
       </section>
+
       <section className="extras-plan-entry panel">
-        <div><div className="eyebrow">OPTIONAL SUPPLEMENTARY TRAINING</div><h2>EXTRAS LIBRARY</h2><p>Neck, grip, calves, posture, athleticism and mobility. Never part of your main rotation.</p></div>
-        <button className="button-primary" onClick={onOpenExtras}>Explore EXTRAS <Icon name="arrow" size={17} /></button>
+        <div>
+          <div className="eyebrow">
+            OPTIONAL SUPPLEMENTARY TRAINING
+          </div>
+          <h2>EXTRAS LIBRARY</h2>
+          <p>
+            Neck, grip, calves, posture, athleticism and mobility. Never
+            part of your main rotation.
+          </p>
+        </div>
+
+        <button className="button-primary" onClick={onOpenExtras}>
+          Explore EXTRAS <Icon name="arrow" size={17} />
+        </button>
       </section>
+
       <div className="rotation-list">
         {workouts.map((item, index) => (
-          <article className={`rotation-card panel ${index === rotationIndex ? 'current' : ''}`} key={item.id}>
+          <article
+            className={`rotation-card panel ${
+              index === rotationIndex ? 'current' : ''
+            }`}
+            key={item.id}
+          >
             <div className="rotation-card-top">
-              <span className="rotation-card-number">{String(index + 1).padStart(2, '0')}</span>
-              {index === rotationIndex && <span className="tiny-pill"><span className="status-dot" /> UP NEXT</span>}
+              <span className="rotation-card-number">
+                {String(index + 1).padStart(2, '0')}
+              </span>
+
+              {index === rotationIndex && (
+                <span className="tiny-pill">
+                  <span className="status-dot" /> UP NEXT
+                </span>
+              )}
             </div>
+
             <h3>{item.name}</h3>
             <p>{item.focus}</p>
+
             <div className="rotation-card-divider" />
+
             <div className="leg-exercise">
-              <span className="leg-icon"><Icon name="activity" size={17} /></span>
-              <div><span className="micro-label">LOWER-BODY MOVEMENT</span><strong>{getLowerBodyExercise(item).name} · {getLowerBodyExercise(item).focus}</strong></div>
+              <span className="leg-icon">
+                <Icon name="activity" size={17} />
+              </span>
+
+              <div>
+                <span className="micro-label">
+                  LOWER-BODY MOVEMENT
+                </span>
+                <strong>
+                  {getLowerBodyExercise(item).name} ·{' '}
+                  {getLowerBodyExercise(item).focus}
+                </strong>
+              </div>
             </div>
-            <div className="rotation-duration"><Icon name="clock" size={15} /> {item.duration}</div>
+
+            <div className="rotation-duration">
+              <Icon name="clock" size={15} /> {item.duration}
+            </div>
           </article>
         ))}
       </div>
-      <p className="rotation-note"><Icon name="moon" size={16} /> Take a full rest day or an easy day between sessions whenever you need it. Nothing is scheduled automatically.</p>
+
+      <p className="rotation-note">
+        <Icon name="moon" size={16} /> Take a full rest day or an easy day
+        between sessions whenever you need it. Nothing is scheduled
+        automatically.
+      </p>
     </>
   )
 }

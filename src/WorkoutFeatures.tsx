@@ -357,6 +357,7 @@ export type RestTimerProps = {
   deadline: number | null
   notificationAvailable: boolean
   notificationPermission: NotificationPermission | 'unsupported'
+  pushConfigured: boolean
   notice: string | null
   onSelectDuration: (seconds: number) => void
   onStart: () => void
@@ -381,6 +382,7 @@ export function RestTimer({
   deadline,
   notificationAvailable,
   notificationPermission,
+  pushConfigured,
   notice,
   onSelectDuration,
   onStart,
@@ -456,9 +458,9 @@ export function RestTimer({
         <button className="timer-reset-button" onClick={onReset}><Icon name="reset" size={15} /> Reset</button>
         <button className="timer-reset-button" onClick={onSkip} disabled={remainingSeconds === 0 && !running}>Skip rest</button>
         <SoundToggle />
-        {notificationAvailable && notificationPermission !== 'granted' && (
+        {notificationAvailable && (!pushConfigured || notificationPermission !== 'granted') && (
           <button className="timer-notification-button" onClick={onEnableNotifications}>
-            Enable alert
+            Enable background alerts
           </button>
         )}
       </div>
@@ -470,7 +472,7 @@ export function RestTimer({
       <p className="timer-note" aria-live="polite">
         {notice ?? (remainingSeconds === 0
           ? 'Rest complete. Take the next set when you’re ready.'
-          : 'Uses an absolute deadline to catch up after the browser wakes. Background alerts may be delayed while suspended.')}
+          : 'Background alerts require permission and an internet connection when the timer is scheduled.')}
       </p>
     </section>
   )
