@@ -8,7 +8,9 @@ import {
   getHistoricalBestOneRepMax,
   getLiveEstimatedOneRepMax,
   getPersonalRecords,
-  getProgressionRecommendation,
+  getProgressionPlan,
+  getExerciseCompletionFeedback,
+  getExerciseMetricType,
   getStalledExercises,
   type ExercisePerformance,
 } from './strengthAnalytics'
@@ -159,9 +161,17 @@ function PerformanceSummary({
   )
 }
 
-function formatSet(set: ExercisePerformance['sets'][number]): string {
+function formatSet(set: ExercisePerformance['sets'][number], exercise?: RecordedExercise): string {
+  const type = exercise ? getExerciseMetricType(exercise.exerciseId, exercise.name, exercise.targetReps) : 'reps'
+  const unit = type === 'timed' || type === 'per-side-time' ? 'sec' : type === 'distance' ? (/\bkm\b/i.test(exercise?.targetReps ?? '') ? 'km' : 'm') : type === 'per-side' ? 'reps/side' : 'reps'
+  if (type === 'assisted') return `${set.weightKg === null ? 'assistance not logged' : `${formatKg(set.weightKg)} kg assist`} × ${set.reps} reps`
+  if (type === 'timed' || type === 'distance') return `${set.weightKg === null ? '' : `${formatKg(set.weightKg)} kg × `}${set.reps} ${unit}`
+  if ((type === 'per-side' || type === 'per-side-time') && set.leftReps != null && set.rightReps != null) {
+    const load = set.weightKg === null ? '' : `${formatKg(set.weightKg)} kg · `
+    return `${load}L ${set.leftReps} / R ${set.rightReps} ${unit}`
+  }
   const weight = set.weightKg === null ? 'Bodyweight / unweighted' : `${formatKg(set.weightKg)} kg`
-  return `${weight} × ${set.reps} reps`
+  return `${weight} × ${set.reps} ${unit}`
 }
 
 export function StrengthProgressPage({ history }: { history: WorkoutRecord[] }) {
@@ -184,11 +194,11 @@ export function StrengthProgressPage({ history }: { history: WorkoutRecord[] }) 
     <div className="strength-progress-page">
       <div className="page-heading">
         <div>
-          <div className="eyebrow">YOUR PROGRESS · PHASE 3.1</div>
+          <div className="eyebrow">YOUR PROGRESS · STRENGTH PROGRESSION</div>
           <h1>Strength, over time.</h1>
           <p className="page-subtitle">A clear view of completed, logged working sets. Nothing is estimated from missing data.</p>
         </div>
-        <div className="weekly-chip">ON THIS DEVICE</div>
+        <div className="weekly-chip">LOCAL RECORDS</div>
       </div>
 
       <section className="strength-progress-panel panel">
@@ -241,7 +251,7 @@ export function StrengthProgressPage({ history }: { history: WorkoutRecord[] }) 
           ) : (
             <div className="strength-record-list">
               {personalRecords.map((record) => (
-                <div className="strength-record-row" key={record.recordId}>
+                <div className="strength-record-row" key={`${record.recordId}:${record.exerciseId}`}>
                   <div>
                     <strong>{record.exerciseName}</strong>
                     <span>{formatDate(record.completedAt)} · {record.workoutName}</span>
@@ -259,7 +269,7 @@ export function StrengthProgressPage({ history }: { history: WorkoutRecord[] }) 
         <section className="strength-progress-panel panel">
           <div className="eyebrow">POTENTIAL PLATEAUS</div>
           <h2>Three-exposure check</h2>
-          <p className="strength-panel-intro">Flags exercises with no more than 1% estimated 1RM growth over the last three logged exposures.</p>
+          <p className="strength-panel-intro">After three comparable non-readiness exposures with full in-range sets, flags estimated 1RM growth of 1% or less. One low session does not trigger a plateau.</p>
           {stalledExercises.length === 0 ? (
             <div className="strength-empty">Not enough comparable logged weighted sets to flag a plateau yet.</div>
           ) : (
@@ -291,7 +301,7 @@ export function StrengthProgressPage({ history }: { history: WorkoutRecord[] }) 
                 <div className="strength-history-sets">
                   {performance.sets.length === 0
                     ? <span>No completed sets logged</span>
-                    : performance.sets.map((set) => <span key={set.id}>{formatSet(set)}</span>)}
+                    : performance.sets.map((set) => <span key={set.id}>{formatSet(set, performance.exercise)}</span>)}
                 </div>
                 <div className="strength-history-estimate">
                   {performance.estimatedOneRepMaxKg === null
@@ -312,10 +322,12 @@ export function PreviousPerformance({
   history,
   exercise,
   activeExercise,
+  readinessAdjusted,
 }: {
   history: WorkoutRecord[]
-  exercise: Pick<RecordedExercise, 'exerciseId' | 'targetReps'>
+  exercise: Pick<RecordedExercise, 'exerciseId' | 'name' | 'targetSets' | 'targetReps'>
   activeExercise: ActiveExercise
+  readinessAdjusted: boolean
 }) {
   const previous = getExercisePerformances(history, exercise.exerciseId)
     .filter((performance) => performance.sets.length > 0)
@@ -327,7 +339,8 @@ export function PreviousPerformance({
   const liveEstimate = getLiveEstimatedOneRepMax(exercise, activeExercise)
   const isNewRecord = liveEstimate !== null
     && (historicalBest === null || liveEstimate > historicalBest)
-  const recommendation = previous ? getProgressionRecommendation(previous) : null
+  const plan = getProgressionPlan(history, exercise, activeExercise.sets.length, readinessAdjusted)
+  const completionFeedback = getExerciseCompletionFeedback(plan, activeExercise.sets, activeExercise.completed)
 
   return (
     <div className="exercise-performance-note">
@@ -335,10 +348,11 @@ export function PreviousPerformance({
         <>
           <strong>Previous · {formatDate(previous.record.completedAt)}</strong>
           <span>
-            {previous.sets.map((set) => formatSet(set)).join(' · ')}
+            {previous.sets.map((set) => formatSet(set, previous.exercise)).join(' · ')}
             {estimate === null ? '' : ` · ${formatKg(estimate)} kg estimated 1RM`}
+            {` · ${previous.sets.length} completed working set${previous.sets.length === 1 ? '' : 's'}`}
           </span>
-          {recommendation && <span className="exercise-recommendation">{recommendation}</span>}
+          {previous.record.readinessAdjusted && <span className="exercise-readiness-history">Readiness-scaled exposure · shown as actual work, excluded from progression and plateau judgements.</span>}
         </>
       ) : (
         <span>No previous completed, logged sets for this exercise.</span>
@@ -349,6 +363,14 @@ export function PreviousPerformance({
           {' · '}{formatKg(liveEstimate)} kg
         </span>
       )}
+      <div className="exercise-progression-plan">
+        <div className="exercise-progression-heading"><strong>PROGRESSION STATUS</strong><span className={`progression-status progression-status-${plan.status.toLowerCase().replaceAll(' ', '-')}`}>{plan.status}</span></div>
+        <span><b>Normal target:</b> {plan.targetText}</span>
+        {readinessAdjusted && <span className="exercise-readiness-history"><b>Today’s adjusted target:</b> {activeExercise.sets.length} working sets. Your normal target above is unchanged.</span>}
+        <span>{plan.reason}</span>
+        <small>Edit today’s set entries below to override any suggested target.</small>
+      </div>
+      {completionFeedback && <span className="exercise-completion-feedback" role="status">{completionFeedback}</span>}
     </div>
   )
 }

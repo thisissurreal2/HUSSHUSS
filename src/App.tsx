@@ -33,6 +33,12 @@ import {
 } from './workoutStorage'
 import { getLowerBodyExercise, getWorkout, workouts, type Workout, type WorkoutId } from './workouts'
 import { ExtrasPage } from './ExtrasPage'
+import { JinGuPage } from './JinGu'
+import { createActiveJinGuSession, type ActiveJinGuSession, type JinGuSession } from './jinGuData'
+import { ReadinessPage } from './ReadinessView'
+import { getLocalDateKey, upsertReadinessCheckIn, type ReadinessCheckIn } from './readiness'
+import { ReadinessDecisionPanel } from './ReadinessActions'
+import { chooseWorkoutPlan, createRecoverySession, getTrainingRecommendation, type RecoveryActivity } from './readinessTraining'
 import {
   getExtraRecommendation,
   extraCategories,
@@ -56,15 +62,16 @@ type IconName =
   | 'trend'
 
 const navigation: { id: Tab; label: string; icon: IconName }[] = [
-  { id: 'overview', label: 'Overview', icon: 'grid' },
-  { id: 'rotation', label: 'Your rotation', icon: 'activity' },
-  { id: 'history', label: 'Workout history', icon: 'clock' },
+  { id: 'overview', label: 'Today', icon: 'grid' },
+  { id: 'rotation', label: 'Train', icon: 'activity' },
+  { id: 'jin-gu', label: 'Jin Gu', icon: 'target' },
+  { id: 'history', label: 'History', icon: 'clock' },
   { id: 'progress', label: 'Progress', icon: 'trend' },
   { id: 'body', label: 'Measurements', icon: 'body' },
 ]
 
-type Tab = 'overview' | 'rotation' | 'history' | 'progress' | 'body' | 'extras'
-type ProgressView = 'dashboard' | 'strength' | 'muscle' | 'athletic' | 'insights' | 'backup'
+type Tab = 'overview' | 'rotation' | 'jin-gu' | 'history' | 'progress' | 'body' | 'extras'
+type ProgressView = 'dashboard' | 'strength' | 'muscle' | 'athletic' | 'insights' | 'backup' | 'readiness'
 
 function Icon({
   name,
@@ -109,6 +116,8 @@ function App() {
   const [progressView, setProgressView] = useState<ProgressView>('dashboard')
   const [data, setData] = useState<AppData>(createInitialData)
   const dataRef = useRef(data)
+  const persistedDataRef = useRef(data)
+  const pendingWorkoutWritesRef = useRef(0)
   const [storageError, setStorageError] = useState<string | null>(null)
   const [completedWorkout, setCompletedWorkout] = useState<WorkoutRecord | null>(null)
   const [extraLaunchCategory, setExtraLaunchCategory] = useState<ExtraCategoryId | null>(null)
@@ -158,6 +167,7 @@ function App() {
         if (!active) return
 
         dataRef.current = workoutsResult.data
+        persistedDataRef.current = workoutsResult.data
         setData(workoutsResult.data)
         setWorkoutWriteAvailable(workoutsResult.usable)
 
@@ -198,21 +208,24 @@ function App() {
   }, [])
 
   const updateData = useCallback((change: (current: AppData) => AppData) => {
-    if (!dataReady || !workoutWriteAvailable) return
+    if (!dataReady || !workoutWriteAvailable) return Promise.resolve(false)
 
     const current = dataRef.current
     const next = change(current)
 
-    if (next === current) return
+    if (next === current) return Promise.resolve(true)
 
     dataRef.current = next
     setData(next)
+    pendingWorkoutWritesRef.current += 1
 
-    void writeAppData(next)
+    return writeAppData(next)
       .then(() => {
+        persistedDataRef.current = next
         setStorageError((error) =>
           error?.startsWith('Workout data could not be saved') ? null : error,
         )
+        return true
       })
       .catch((error: unknown) => {
         setStorageError(
@@ -220,10 +233,19 @@ function App() {
             error instanceof Error ? error.message : 'unknown error'
           }`,
         )
+        if (import.meta.env.DEV) console.error('HUSHHUSS local workout save failed', error)
+        return false
+      })
+      .finally(() => {
+        pendingWorkoutWritesRef.current -= 1
+        if (pendingWorkoutWritesRef.current === 0 && dataRef.current !== persistedDataRef.current) {
+          dataRef.current = persistedDataRef.current
+          setData(persistedDataRef.current)
+        }
       })
   }, [dataReady, workoutWriteAvailable])
 
-  function startWorkout() {
+  function startWorkout(applyScaleBack = false) {
     const current = dataRef.current
 
     if (current.currentWorkout) {
@@ -237,6 +259,9 @@ function App() {
     }
 
     const nextWorkoutId: WorkoutId = workouts[current.rotationIndex].id
+    const todayCheckIn = current.readiness?.find((entry) => entry.date === getLocalDateKey())
+    const shouldScale = applyScaleBack && getTrainingRecommendation(todayCheckIn).category === 'caution'
+    const workoutTemplate = shouldScale ? chooseWorkoutPlan(workouts[current.rotationIndex], true) : undefined
 
     updateData((latest) => ({
       ...latest,
@@ -244,6 +269,8 @@ function App() {
         nextWorkoutId,
         Date.now(),
         latest.history,
+        workoutTemplate,
+        Boolean(shouldScale),
       ),
       recoverySelected: false,
     }))
@@ -255,6 +282,50 @@ function App() {
         behavior: 'smooth',
       }),
     )
+  }
+
+  function saveRecovery(activity: RecoveryActivity, duration: number | null, notes: string) {
+    const session = createRecoverySession(activity, duration, notes, getLocalDateKey())
+    return updateData((current) => ({
+      ...current,
+      recoverySessions: [session, ...(current.recoverySessions ?? [])],
+    }))
+  }
+
+  function startJinGu(lightPractice: boolean) {
+    const current = dataRef.current
+    if (current.activeJinGuSession) return Promise.resolve(true)
+    const session = createActiveJinGuSession(
+      lightPractice,
+      current.jinGuHorseStanceTargetSeconds ?? 20,
+      getLocalDateKey(),
+    )
+    return updateData((latest) => latest.activeJinGuSession
+      ? latest
+      : { ...latest, activeJinGuSession: session })
+  }
+
+  function updateJinGuSession(session: ActiveJinGuSession) {
+    return updateData((current) => current.activeJinGuSession?.id === session.id
+      ? { ...current, activeJinGuSession: session }
+      : current)
+  }
+
+  function finishJinGuSession(session: JinGuSession) {
+    return updateData((current) => {
+      if (current.jinGuSessions?.some((item) => item.id === session.id)) {
+        return current.activeJinGuSession?.id === session.id ? { ...current, activeJinGuSession: null } : current
+      }
+      if (current.activeJinGuSession?.id !== session.id) return current
+      return { ...current, activeJinGuSession: null, jinGuSessions: [session, ...(current.jinGuSessions ?? [])] }
+    })
+  }
+
+  function setJinGuHorseStanceTarget(seconds: number) {
+    return updateData((current) => {
+      if (![20, 25, 30, 35].includes(seconds) || seconds !== (current.jinGuHorseStanceTargetSeconds ?? 20) + 5) return current
+      return { ...current, jinGuHorseStanceTargetSeconds: seconds, jinGuHorseStanceTargetChangedAt: Date.now() }
+    })
   }
 
   function updateCurrentWorkout(
@@ -333,6 +404,7 @@ function App() {
       await writeAppData(next)
 
       dataRef.current = next
+      persistedDataRef.current = next
       setData(next)
       setStorageError(null)
       setCompletedWorkout(record)
@@ -377,6 +449,7 @@ function App() {
     await writeAppData(next)
 
     dataRef.current = next
+    persistedDataRef.current = next
     setData(next)
     setStorageError(null)
 
@@ -782,7 +855,7 @@ function App() {
 
         <div className="sidebar-footer">
           <span className="status-dot" />
-          PHASE 3.5 · ON THIS DEVICE
+          PRIVATE · STORED ON THIS DEVICE
         </div>
       </aside>
 
@@ -807,7 +880,21 @@ function App() {
             <Overview
               workout={workout}
               activeWorkout={data.currentWorkout}
+              preferredSubstitutions={data.preferredSubstitutions ?? {}}
+              onSavePreferredSubstitution={(sourceId, candidateId) => updateData((current) => ({
+                ...current,
+                preferredSubstitutions: { ...(current.preferredSubstitutions ?? {}), [sourceId]: candidateId },
+              }))}
+              onRemovePreferredSubstitution={(sourceId) => updateData((current) => {
+                const preferredSubstitutions = { ...(current.preferredSubstitutions ?? {}) }
+                delete preferredSubstitutions[sourceId]
+                return { ...current, preferredSubstitutions }
+              })}
               recoverySelected={data.recoverySelected}
+              todayReadiness={(data.readiness ?? []).find((entry) => entry.date === getLocalDateKey())}
+              onOpenReadiness={() => { setProgressView('readiness'); goToTab('progress') }}
+              onStartScaled={() => startWorkout(true)}
+              onSaveRecovery={saveRecovery}
               greeting={greeting}
               completedCount={data.history.length}
               history={data.history}
@@ -866,10 +953,29 @@ function App() {
             <RotationPage
               rotationIndex={data.rotationIndex}
               onStart={startWorkout}
+              todayReadiness={(data.readiness ?? []).find((entry) => entry.date === getLocalDateKey())}
+              activeWorkout={data.currentWorkout}
+              onOpenReadiness={() => { setProgressView('readiness'); goToTab('progress') }}
+              onStartScaled={() => startWorkout(true)}
+              onSaveRecovery={saveRecovery}
               onOpenExtras={() => {
                 setExtraLaunchCategory(null)
                 setActiveTab('extras')
               }}
+            />
+          )}
+
+          {activeTab === 'jin-gu' && (
+            <JinGuPage
+              history={data.jinGuSessions ?? []}
+              activeSession={data.activeJinGuSession ?? null}
+              horseStanceTargetSeconds={data.jinGuHorseStanceTargetSeconds ?? 20}
+              horseStanceTargetChangedAt={data.jinGuHorseStanceTargetChangedAt ?? null}
+              readinessCategory={getTrainingRecommendation((data.readiness ?? []).find((entry) => entry.date === getLocalDateKey())).category === 'missing' ? undefined : getTrainingRecommendation((data.readiness ?? []).find((entry) => entry.date === getLocalDateKey())).category}
+              onStart={startJinGu}
+              onUpdate={updateJinGuSession}
+              onFinish={finishJinGuSession}
+              onSetHorseStanceTarget={setJinGuHorseStanceTarget}
             />
           )}
 
@@ -941,6 +1047,7 @@ function App() {
           {activeTab === 'progress' && (
             <div className="progress-tab-content">
               <div className="progress-view-tabs" aria-label="Progress views">
+                <button type="button" className={progressView === 'readiness' ? 'selected' : ''} aria-pressed={progressView === 'readiness'} onClick={() => setProgressView('readiness')}>Daily readiness</button>
                 <button
                   type="button"
                   className={progressView === 'dashboard' ? 'selected' : ''}
@@ -1001,6 +1108,18 @@ function App() {
                   history={data.history}
                   onOpenHistory={() => setActiveTab('history')}
                   onOpenStrengthProgress={() => setProgressView('strength')}
+                />
+              </div>
+
+              <div hidden={progressView !== 'readiness'}>
+                <ReadinessPage
+                  history={data.readiness ?? []}
+                  workouts={data.history}
+                  recoverySessions={data.recoverySessions ?? []}
+                  onSave={(ratings) => updateData((current) => ({
+                    ...current,
+                    readiness: upsertReadinessCheckIn(current.readiness ?? [], ratings, getLocalDateKey()),
+                  }))}
                 />
               </div>
 
@@ -1142,20 +1261,11 @@ function App() {
             key={item.id}
             onClick={() => goToTab(item.id)}
             aria-current={activeTab === item.id ? 'page' : undefined}
+            aria-label={item.label}
           >
             <Icon name={item.icon} size={20} />
 
-            <span>
-              {item.id === 'overview'
-                ? 'Home'
-                : item.id === 'rotation'
-                  ? 'Plan'
-                  : item.id === 'history'
-                    ? 'History'
-                    : item.id === 'progress'
-                      ? 'Progress'
-                      : 'Body'}
-            </span>
+            <span>{item.id === 'body' ? 'Body' : item.label}</span>
           </button>
         ))}
       </nav>
@@ -1179,7 +1289,11 @@ function App() {
 function Overview({
   workout,
   activeWorkout,
+  preferredSubstitutions,
+  onSavePreferredSubstitution,
+  onRemovePreferredSubstitution,
   recoverySelected,
+  todayReadiness,
   greeting,
   completedCount,
   history,
@@ -1193,10 +1307,17 @@ function Overview({
   onWorkoutChange,
   timer,
   onOpenRotation,
+  onOpenReadiness,
+  onStartScaled,
+  onSaveRecovery,
 }: {
   workout: Workout
   activeWorkout: ActiveWorkout | null
+  preferredSubstitutions: Record<string, string>
+  onSavePreferredSubstitution: (sourceId: string, candidateId: string) => void
+  onRemovePreferredSubstitution: (sourceId: string) => void
   recoverySelected: boolean
+  todayReadiness?: ReadinessCheckIn
   greeting: string
   completedCount: number
   history: AppData['history']
@@ -1210,6 +1331,9 @@ function Overview({
   onWorkoutChange: (change: (current: ActiveWorkout) => ActiveWorkout) => void
   timer: RestTimerProps
   onOpenRotation: () => void
+  onOpenReadiness: () => void
+  onStartScaled: () => void
+  onSaveRecovery: (activity: RecoveryActivity, duration: number | null, notes: string) => Promise<boolean>
 }) {
   const dayStatus = activeWorkout
     ? 'active'
@@ -1235,10 +1359,17 @@ function Overview({
         </div>
       </div>
 
-      <XpCard history={history} extras={extras} />
+      <ReadinessDecisionPanel
+        checkIn={todayReadiness}
+        workout={workout}
+        activeWorkout={activeWorkout}
+        onOpenCheckIn={onOpenReadiness}
+        onStartScaled={onStartScaled}
+        onSaveRecovery={onSaveRecovery}
+      />
 
       <section
-        className={`hero-card ${
+        className={`hero-card today-brief ${
           dayStatus === 'recovery' ? 'recovery-hero' : ''
         }`}
       >
@@ -1325,6 +1456,8 @@ function Overview({
           </span>
         </div>
       </section>
+
+      <XpCard history={history} extras={extras} />
 
       <div className="section-heading">
         <div>
@@ -1439,6 +1572,9 @@ function Overview({
           <WorkoutSession
             workout={workout}
             activeWorkout={activeWorkout}
+            preferredSubstitutions={preferredSubstitutions}
+            onSavePreferredSubstitution={onSavePreferredSubstitution}
+            onRemovePreferredSubstitution={onRemovePreferredSubstitution}
             history={history}
             onChange={onWorkoutChange}
             onFinish={onFinish}
@@ -1454,10 +1590,20 @@ function Overview({
 function RotationPage({
   rotationIndex,
   onStart,
+  todayReadiness,
+  activeWorkout,
+  onOpenReadiness,
+  onStartScaled,
+  onSaveRecovery,
   onOpenExtras,
 }: {
   rotationIndex: number
   onStart: () => void
+  todayReadiness?: ReadinessCheckIn
+  activeWorkout: ActiveWorkout | null
+  onOpenReadiness: () => void
+  onStartScaled: () => void
+  onSaveRecovery: (activity: RecoveryActivity, duration: number | null, notes: string) => Promise<boolean>
   onOpenExtras: () => void
 }) {
   return (
@@ -1475,6 +1621,15 @@ function RotationPage({
           <Icon name="moon" size={16} /> REST DAYS ARE BUILT IN
         </div>
       </div>
+
+      <ReadinessDecisionPanel
+        checkIn={todayReadiness}
+        workout={workouts[rotationIndex]}
+        activeWorkout={activeWorkout}
+        onOpenCheckIn={onOpenReadiness}
+        onStartScaled={onStartScaled}
+        onSaveRecovery={onSaveRecovery}
+      />
 
       <section className="rotation-intro panel">
         <div className="rotation-intro-icon">

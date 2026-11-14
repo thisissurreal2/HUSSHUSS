@@ -592,7 +592,7 @@ export function BackupRecovery({ onRestored }: { onRestored: () => void }) {
     <div className="backup-recovery">
       <div className="page-heading">
         <div>
-          <div className="eyebrow">YOUR DATA · PHASE 4.3</div>
+          <div className="eyebrow">YOUR DATA · BACKUP & RECOVERY</div>
           <h1>Keep a copy. Keep control.</h1>
           <p className="page-subtitle">Local records stay primary. Export, restore, or explicitly sync an encrypted backup.</p>
         </div>
@@ -623,7 +623,7 @@ export function BackupRecovery({ onRestored }: { onRestored: () => void }) {
                     ? 'The secure connection service could not be reached or returned an invalid status. No connected state is assumed.'
                     : 'Checking with the secure connection service…'}
           </p>
-          <p>Phase 4.3 can transfer only client-encrypted backups after this device’s private repository connection is verified.</p>
+          <p>Cloud transfer is limited to encrypted backups and requires a verified private repository connection for this device.</p>
           {connectionMessage && <p className="connection-message" role="status">{connectionMessage}</p>}
           <div className="backup-actions connection-actions">
             {githubStatus.kind === 'not-connected' && (

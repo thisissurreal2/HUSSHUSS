@@ -28,6 +28,14 @@
   --blue-soft: rgba(54, 229, 255, 0.12);
   --font-display: "Arial Narrow", "Roboto Condensed", "Aptos Narrow", sans-serif;
   --font-mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --radius-control: 4px;
+  --radius-panel: 6px;
+  --target-mobile: 44px;
 }
 
 * {
@@ -71,6 +79,6 @@ a:focus-visible {
 }
 
 ::selection {
-  color: #f7faff;
-  background: rgba(91, 145, 245, 0.38);
+  color: var(--carbon);
+  background: rgba(54, 229, 255, 0.55);
 }

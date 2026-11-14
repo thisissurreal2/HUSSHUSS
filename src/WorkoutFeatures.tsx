@@ -3,7 +3,17 @@ import { playSound } from './sound'
 import { SoundToggle } from './soundToggle'
 import { restPresets, type ActiveWorkout, type SetEntry, type WorkoutRecord } from './workoutStorage'
 import { PreviousPerformance } from './StrengthProgress'
-import type { ChecklistItem, Workout } from './workouts'
+import { getWorkout, type ChecklistItem, type Exercise, type Workout } from './workouts'
+import { getExerciseMetricType } from './strengthAnalytics'
+import {
+  applySessionSubstitution,
+  equipmentChoices,
+  getMuscleNames,
+  getSubstitutionCandidates,
+  getSubstitutionDefinition,
+  type Equipment,
+  type SubstitutionReason,
+} from './exerciseSubstitutions'
 
 function Icon({
   name,
@@ -56,6 +66,22 @@ function updateSet(
           sets: exercise.sets.map((set) => set.id === setId ? change(set) : set),
         }),
   }
+}
+
+function updateSideQuantity(
+  workout: ActiveWorkout,
+  exerciseId: string,
+  setId: string,
+  side: 'leftReps' | 'rightReps',
+  value: string,
+): ActiveWorkout {
+  return updateSet(workout, exerciseId, setId, (current) => {
+    const next = { ...current, [side]: value }
+    const left = side === 'leftReps' ? value : current.leftReps ?? ''
+    const right = side === 'rightReps' ? value : current.rightReps ?? ''
+    const bothValid = /^\d+$/.test(left) && Number(left) > 0 && /^\d+$/.test(right) && Number(right) > 0
+    return { ...next, reps: bothValid ? String(Math.min(Number(left), Number(right))) : '' }
+  })
 }
 
 function ChecklistSection({
@@ -122,10 +148,95 @@ function ChecklistSection({
   )
 }
 
+function SubstitutionPicker({
+  index,
+  exercise,
+  activeWorkout,
+  history,
+  preferredSubstitutions,
+  onChange,
+  onSavePreferred,
+  onRemovePreferred,
+}: {
+  index: number
+  exercise: Exercise
+  activeWorkout: ActiveWorkout
+  history: WorkoutRecord[]
+  preferredSubstitutions: Record<string, string>
+  onChange: (change: (current: ActiveWorkout) => ActiveWorkout) => void
+  onSavePreferred: (sourceId: string, candidateId: string) => void
+  onRemovePreferred: (sourceId: string) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const [reason, setReason] = useState<SubstitutionReason>('equipment-unavailable')
+  const state = activeWorkout.exercises[index]
+  const sourceId = state.substitution?.originalExerciseId ?? exercise.id
+  const sourceProfile = getSubstitutionDefinition(sourceId)
+  const [unavailable, setUnavailable] = useState<Equipment[]>(() => sourceProfile?.equipment ?? [])
+  const candidates = getSubstitutionCandidates(sourceId, reason, unavailable, preferredSubstitutions[sourceId])
+    .filter((candidate) => candidate.id !== exercise.id)
+  const currentProfile = getSubstitutionDefinition(sourceId)
+
+  function select(candidateId: string) {
+    const hasEnteredWork = state.completed || state.sets.some((set) => set.completed || set.weightKg !== '' || set.reps !== '' || Boolean(set.leftReps) || Boolean(set.rightReps))
+    if (hasEnteredWork && !window.confirm('Changing this exercise clears its current unsaved set entries. Continue?')) return
+    onChange((current) => applySessionSubstitution(current, index, candidateId, reason, history))
+    setOpen(false)
+  }
+
+  return <div className="substitution-control">
+    <button type="button" className="substitution-trigger" aria-expanded={open} onClick={() => setOpen((value) => !value)}>
+      {open ? 'Close alternatives' : state.substitution ? 'Choose another exercise' : 'Substitute exercise'}
+    </button>
+    {state.substitution && <span className="substitution-origin">Substituted for {getSubstitutionDefinition(state.substitution.originalExerciseId)?.name ?? state.substitution.originalExerciseId}</span>}
+    {open && <section className="substitution-picker" aria-label={`Alternatives for ${exercise.name}`}>
+      <div className="substitution-picker-head"><div><span className="eyebrow">KEEP THE SESSION ON TRACK</span><h4>Alternatives for {getSubstitutionDefinition(sourceId)?.name ?? exercise.name}</h4></div></div>
+      <label className="substitution-reason-label">Why are you switching?
+        <select value={reason} onChange={(event) => {
+          const value = event.currentTarget.value as SubstitutionReason
+          setReason(value)
+          setUnavailable(value === 'equipment-unavailable' ? sourceProfile?.equipment ?? [] : [])
+        }}>
+          <option value="equipment-unavailable">Equipment unavailable</option>
+          <option value="machine-occupied">Machine occupied</option>
+          <option value="uncomfortable">Exercise uncomfortable</option>
+          <option value="variation">Want a different variation</option>
+          <option value="pain">Pain or physical limitation</option>
+        </select>
+      </label>
+      {reason === 'pain' && <p className="substitution-pain-note">Stop the painful movement. These options are not medically assessed; only choose an alternative if it feels comfortable, or stop and seek appropriate care.</p>}
+      {preferredSubstitutions[sourceId] && <button type="button" className="substitution-remove-preference" onClick={() => onRemovePreferred(sourceId)}>Remove saved preference</button>}
+      {(reason === 'equipment-unavailable' || reason === 'machine-occupied') && <fieldset className="substitution-equipment-filter">
+        <legend>Also unavailable</legend>
+        {equipmentChoices.map((item) => <label key={item.id}><input type="checkbox" checked={unavailable.includes(item.id)} onChange={(event) => {
+          const checked = event.currentTarget.checked
+          setUnavailable((current) => checked
+            ? current.includes(item.id) ? current : [...current, item.id]
+            : current.filter((id) => id !== item.id))
+        }} />{item.label}</label>)}
+      </fieldset>}
+      {currentProfile && <p className="substitution-current-target">Original target: {exercise.targetSets} × {currentProfile.targetReps}. Alternatives keep this session’s set count and use their own rep target.</p>}
+      <div className="substitution-candidate-list">{candidates.length ? candidates.slice(0, 6).map((candidate) => {
+        const muscles = getMuscleNames(candidate)
+        return <article className="substitution-candidate" key={candidate.id}>
+          <div className="substitution-candidate-title"><div><h5>{candidate.name}</h5><span>{candidate.equipment.map((item) => equipmentChoices.find((choice) => choice.id === item)?.label ?? item).join(' · ')}</span></div>{preferredSubstitutions[sourceId] === candidate.id && <b>Preferred</b>}</div>
+          <p><strong>Primary:</strong> {muscles.primary.join(', ') || 'Grip / balance'}{muscles.secondary.length ? <> · <strong>Also:</strong> {muscles.secondary.join(', ')}</> : null}</p>
+          <p><strong>Pattern:</strong> {candidate.pattern.replaceAll('-', ' ')} · <strong>Type:</strong> {candidate.type}</p>
+          <p>{candidate.reason} {candidate.difficulty}</p>
+          <div className="substitution-candidate-actions"><button type="button" className="button button-primary" onClick={() => select(candidate.id)}>Use this exercise</button><button type="button" className="substitution-prefer-button" onClick={() => onSavePreferred(sourceId, candidate.id)}>{preferredSubstitutions[sourceId] === candidate.id ? 'Preferred' : 'Save preference'}</button></div>
+        </article>
+      }) : <p className="substitution-empty">No close match with those filters. Clear an equipment filter or pick another reason.</p>}</div>
+    </section>}
+  </div>
+}
+
 export function WorkoutSession({
   workout,
   activeWorkout,
   history,
+  preferredSubstitutions,
+  onSavePreferredSubstitution,
+  onRemovePreferredSubstitution,
   onChange,
   onFinish,
   onCancel,
@@ -134,6 +245,9 @@ export function WorkoutSession({
   workout: Workout
   activeWorkout: ActiveWorkout
   history: WorkoutRecord[]
+  preferredSubstitutions: Record<string, string>
+  onSavePreferredSubstitution: (sourceId: string, candidateId: string) => void
+  onRemovePreferredSubstitution: (sourceId: string) => void
   onChange: (change: (current: ActiveWorkout) => ActiveWorkout) => void
   onFinish: () => void
   onCancel: () => void
@@ -186,9 +300,15 @@ export function WorkoutSession({
         <div className="session-exercises">
         {workout.exercises.map((exercise, index) => {
           const state = activeWorkout.exercises[index]
+          const metricType = getExerciseMetricType(exercise.id, exercise.name, exercise.targetReps)
+          const isSideSpecific = metricType === 'per-side' || metricType === 'per-side-time'
+          const distanceUnit = /\bkm\b/i.test(exercise.targetReps) ? 'km' : 'metres'
+          const distanceHeading = distanceUnit === 'km' ? 'KM' : 'M'
+          const quantityLabel = metricType === 'timed' || metricType === 'per-side-time' ? 'seconds' : metricType === 'distance' ? `distance in ${distanceUnit}` : 'repetitions'
+          const quantityHeading = metricType === 'timed' ? 'SEC' : metricType === 'per-side-time' ? 'SEC / SIDE' : metricType === 'distance' ? distanceHeading : metricType === 'per-side' ? 'REPS / SIDE' : 'REPS'
           return (
             <article
-              className={`session-exercise ${state.completed ? 'exercise-complete' : ''}`}
+              className={`session-exercise ${state.completed ? 'exercise-complete' : ''} ${index === activeWorkout.exercises.findIndex((item) => !item.completed) ? 'exercise-current' : ''}`}
               key={exercise.id}
             >
               <div className="session-exercise-heading">
@@ -203,24 +323,28 @@ export function WorkoutSession({
               </div>
               <p className="exercise-instructions">{exercise.instructions}</p>
               <div className="exercise-target">
-                Target · {exercise.targetSets} sets × {/\b(seconds?|per side|per leg)\b/i.test(exercise.targetReps)
+                Target · {exercise.targetSets} sets × {/\b(seconds?|secs?|sec|s|meters?|metres?|m|km|per side|per leg)\b/i.test(exercise.targetReps)
                   ? exercise.targetReps
                   : `${exercise.targetReps} reps`}
               </div>
               <PreviousPerformance
                 history={history}
-                exercise={{ exerciseId: exercise.id, targetReps: exercise.targetReps }}
+                exercise={(() => {
+                  const normalPrescription = getWorkout(workout.id).exercises.find((item) => item.id === exercise.id) ?? exercise
+                  return { exerciseId: normalPrescription.id, name: normalPrescription.name, targetSets: normalPrescription.targetSets, targetReps: normalPrescription.targetReps }
+                })()}
                 activeExercise={state}
+                readinessAdjusted={activeWorkout.readinessAdjusted ?? false}
               />
 
               <div className="set-table">
-                <div className="set-row set-labels" aria-hidden="true">
-                  <span>SET</span><span>KG</span><span>REPS</span><span>DONE</span><span />
+                <div className={`set-row set-labels ${isSideSpecific ? 'set-row-sides' : ''}`} aria-hidden="true">
+                  <span>SET</span><span>{metricType === 'assisted' ? 'ASSIST KG' : 'KG'}</span>{isSideSpecific ? <><span>L · {quantityHeading.split('/')[0]}</span><span>R · {quantityHeading.split('/')[0]}</span></> : <span>{quantityHeading}</span>}<span>DONE</span><span />
                 </div>
                 {state.sets.map((set, setIndex) => (
-                  <div className="set-row" key={set.id}>
+                  <div className={`set-row ${isSideSpecific ? 'set-row-sides' : ''}`} key={set.id}>
                     <span className="set-index">{String(setIndex + 1).padStart(2, '0')}</span>
-                    <label className="visually-hidden" htmlFor={`${set.id}-weight`}>{exercise.name} set {setIndex + 1} weight in kilograms</label>
+                    <label className="visually-hidden" htmlFor={`${set.id}-weight`}>{exercise.name} set {setIndex + 1} {metricType === 'assisted' ? 'assistance' : 'load'} in kilograms</label>
                     <input
                       id={`${set.id}-weight`}
                       className="set-input"
@@ -238,22 +362,19 @@ export function WorkoutSession({
                         }
                       }}
                     />
-                    <label className="visually-hidden" htmlFor={`${set.id}-reps`}>{exercise.name} set {setIndex + 1} repetitions</label>
-                    <input
-                      id={`${set.id}-reps`}
-                      className="set-input"
-                      type="text"
-                      inputMode="numeric"
-                      autoComplete="off"
-                      placeholder="—"
-                      value={set.reps}
-                      onChange={(event) => {
+                    {isSideSpecific ? (['leftReps', 'rightReps'] as const).map((side) => <span className="side-quantity-field" key={side}>
+                      <label className="visually-hidden" htmlFor={`${set.id}-${side}`}>{exercise.name} set {setIndex + 1} {side === 'leftReps' ? 'left' : 'right'} {quantityLabel}</label>
+                      <input id={`${set.id}-${side}`} className="set-input" type="text" inputMode="numeric" autoComplete="off" placeholder="—" value={set[side] ?? ''} onChange={(event) => {
                         const value = event.currentTarget.value
-                        if (value === '' || (/^\d+$/.test(value) && Number(value) > 0 && Number(value) <= 500)) {
-                          onChange((current) => updateSet(current, exercise.id, set.id, (item) => ({ ...item, reps: value })))
-                        }
-                      }}
-                    />
+                        if (value === '' || (/^\d+$/.test(value) && Number(value) > 0 && Number(value) <= 500)) onChange((current) => updateSideQuantity(current, exercise.id, set.id, side, value))
+                      }} />
+                    </span>) : <>
+                      <label className="visually-hidden" htmlFor={`${set.id}-reps`}>{exercise.name} set {setIndex + 1} {quantityLabel}</label>
+                      <input id={`${set.id}-reps`} className="set-input" type="text" inputMode="numeric" autoComplete="off" placeholder="—" value={set.reps} onChange={(event) => {
+                        const value = event.currentTarget.value
+                        if (value === '' || (/^\d+$/.test(value) && Number(value) > 0 && Number(value) <= 500)) onChange((current) => updateSet(current, exercise.id, set.id, (item) => ({ ...item, reps: value })))
+                      }} />
+                    </>}
                     <button
                       className={`set-complete-button ${set.completed ? 'selected' : ''}`}
                       onClick={() => {
@@ -314,6 +435,16 @@ export function WorkoutSession({
                   {state.completed ? 'Completed' : 'Mark exercise done'}
                 </button>
               </div>
+              <SubstitutionPicker
+                index={index}
+                exercise={exercise}
+                activeWorkout={activeWorkout}
+                history={history}
+                preferredSubstitutions={preferredSubstitutions}
+                onChange={onChange}
+                onSavePreferred={onSavePreferredSubstitution}
+                onRemovePreferred={onRemovePreferredSubstitution}
+              />
             </article>
           )
         })}
@@ -514,6 +645,7 @@ export function HistoryPage({
                     <span className="eyebrow">{new Intl.DateTimeFormat('en', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' }).format(record.completedAt)}</span>
                     <h2>{record.workoutName} day</h2>
                     <p><Icon name="clock" size={14} /> {formatDuration(record.durationSeconds)} · {record.exercises.length} exercises</p>
+                    {record.readinessAdjusted && <span className="readiness-adjusted-history">READINESS SCALED SESSION · ACTUAL COMPLETED SETS SHOWN BELOW</span>}
                   </div>
                   <span className="history-done"><Icon name="check" size={14} /> COMPLETE</span>
                 </div>
@@ -542,7 +674,7 @@ export function HistoryPage({
                     {record.exercises.map((exercise) => (
                       <section className="history-exercise" key={exercise.exerciseId}>
                         <div className="history-exercise-heading">
-                          <h3>{exercise.name}</h3>
+                          <div><h3>{exercise.name}</h3>{exercise.originalExerciseId && <span className="history-substitution-label">SUB FOR {getSubstitutionDefinition(exercise.originalExerciseId)?.name ?? exercise.originalExerciseId} · {exercise.substitutionReason?.replaceAll('-', ' ')}</span>}</div>
                           <span>{exercise.completed ? 'DONE' : 'NOT MARKED DONE'}</span>
                         </div>
                         <p>{exercise.instructions}</p>

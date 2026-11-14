@@ -1,6 +1,10 @@
 import { getWorkout, workouts, type Exercise, type Workout, type WorkoutId } from './workouts'
 import { readPrimarySnapshot, writePrimarySnapshot } from './localDatabase'
 import { isExtraSessionRecord, type ExtraSessionRecord } from './extras'
+import { isReadinessCheckIn, type ReadinessCheckIn } from './readiness'
+import { isRecoverySession, type RecoverySession } from './readinessTraining'
+import { validateSubstitutionForExercise } from './exerciseSubstitutions'
+import { isActiveJinGuSession, isJinGuSession, type ActiveJinGuSession, type JinGuSession } from './jinGuData'
 
 export const STORAGE_KEY = 'husshuss.data'
 export const DATA_VERSION = 2
@@ -10,12 +14,15 @@ export type SetEntry = {
   weightKg: string
   reps: string
   completed: boolean
+  leftReps?: string
+  rightReps?: string
 }
 
 export type ActiveExercise = {
   exerciseId: string
   completed: boolean
   sets: SetEntry[]
+  substitution?: { originalExerciseId: string; reason: string }
 }
 
 export type ActiveWorkout = {
@@ -26,6 +33,7 @@ export type ActiveWorkout = {
   exercises: ActiveExercise[]
   warmupCompletedIds: string[]
   cooldownCompletedIds: string[]
+  readinessAdjusted?: boolean
 }
 
 export type RecordedSet = {
@@ -33,6 +41,8 @@ export type RecordedSet = {
   weightKg: number | null
   reps: number | null
   completed: boolean
+  leftReps?: number | null
+  rightReps?: number | null
 }
 
 export type RecordedExercise = {
@@ -43,6 +53,8 @@ export type RecordedExercise = {
   targetReps: string
   completed: boolean
   sets: RecordedSet[]
+  originalExerciseId?: string
+  substitutionReason?: string
 }
 
 export type WorkoutRecord = {
@@ -53,6 +65,7 @@ export type WorkoutRecord = {
   completedAt: number
   durationSeconds: number
   exercises: RecordedExercise[]
+  readinessAdjusted?: boolean
 }
 
 export type AppData = {
@@ -70,6 +83,13 @@ export type AppData = {
   timerAutoStart?: boolean
   timerCountdownWarnings?: boolean
   timerVibration?: boolean
+  readiness?: ReadinessCheckIn[]
+  recoverySessions?: RecoverySession[]
+  preferredSubstitutions?: Record<string, string>
+  jinGuSessions?: JinGuSession[]
+  activeJinGuSession?: ActiveJinGuSession | null
+  jinGuHorseStanceTargetSeconds?: number
+  jinGuHorseStanceTargetChangedAt?: number | null
 }
 
 export const restPresets = [30, 60, 90, 120, 180] as const
@@ -89,6 +109,13 @@ export function createInitialData(): AppData {
     recoverySelected: false,
     extrasSessions: [],
     extrasFavourites: [],
+    readiness: [],
+    recoverySessions: [],
+    preferredSubstitutions: {},
+    jinGuSessions: [],
+    activeJinGuSession: null,
+    jinGuHorseStanceTargetSeconds: 20,
+    jinGuHorseStanceTargetChangedAt: null,
     timerAutoStart: true,
     timerCountdownWarnings: true,
     timerVibration: false,
@@ -106,7 +133,7 @@ function previousSets(history: WorkoutRecord[], exerciseId: string): RecordedSet
   for (const record of history) {
     const exercise = record.exercises.find((item) => item.exerciseId === exerciseId)
     if (!exercise || record.completedAt <= latestAt) continue
-    const done = exercise.sets.filter((set) => set.completed && set.weightKg !== null && set.reps !== null)
+    const done = exercise.sets.filter((set) => set.completed && set.reps !== null)
     if (done.length === 0) continue
     latestAt = record.completedAt
     latest = done
@@ -118,8 +145,10 @@ export function createActiveWorkout(
   workoutId: WorkoutId,
   startedAt = Date.now(),
   history: WorkoutRecord[] = [],
+  workoutOverride?: Workout,
+  readinessAdjusted = false,
 ): ActiveWorkout {
-  const workout = getWorkout(workoutId)
+  const workout = workoutOverride ?? getWorkout(workoutId)
   return {
     id: createId(),
     workoutId,
@@ -134,15 +163,18 @@ export function createActiveWorkout(
           const last = previous[Math.min(index, previous.length - 1)]
           return {
             id: createId(),
-            weightKg: last ? String(last.weightKg) : '',
+            weightKg: last?.weightKg === null || last === undefined ? '' : String(last.weightKg),
             reps: last ? String(last.reps) : '',
             completed: false,
+            ...(last?.leftReps !== undefined ? { leftReps: last.leftReps === null ? '' : String(last.leftReps) } : {}),
+            ...(last?.rightReps !== undefined ? { rightReps: last.rightReps === null ? '' : String(last.rightReps) } : {}),
           }
         }),
       }
     }),
     warmupCompletedIds: [],
     cooldownCompletedIds: [],
+    ...(readinessAdjusted ? { readinessAdjusted: true } : {}),
   }
 }
 
@@ -168,6 +200,8 @@ function isSetEntry(value: unknown): value is SetEntry {
     && typeof value.reps === 'string'
     && (value.reps === '' || (/^\d+$/.test(value.reps) && Number(value.reps) > 0 && Number(value.reps) <= 500))
     && typeof value.completed === 'boolean'
+    && (value.leftReps === undefined || typeof value.leftReps === 'string' && (value.leftReps === '' || /^\d+$/.test(value.leftReps) && Number(value.leftReps) > 0 && Number(value.leftReps) <= 500))
+    && (value.rightReps === undefined || typeof value.rightReps === 'string' && (value.rightReps === '' || /^\d+$/.test(value.rightReps) && Number(value.rightReps) > 0 && Number(value.rightReps) <= 500))
 }
 
 function isExercise(value: unknown): value is Exercise {
@@ -211,7 +245,8 @@ function isActiveWorkout(value: unknown): value is ActiveWorkout {
   if (!isObject(value) || typeof value.id !== 'string' || !isWorkoutId(value.workoutId)
     || !isTimestamp(value.startedAt) || !isWorkoutTemplate(value.template)
     || value.template.id !== value.workoutId || !Array.isArray(value.exercises)
-    || !Array.isArray(value.warmupCompletedIds) || !Array.isArray(value.cooldownCompletedIds)) {
+    || !Array.isArray(value.warmupCompletedIds) || !Array.isArray(value.cooldownCompletedIds)
+    || (value.readinessAdjusted !== undefined && typeof value.readinessAdjusted !== 'boolean')) {
     return false
   }
   const template = value.template
@@ -221,6 +256,9 @@ function isActiveWorkout(value: unknown): value is ActiveWorkout {
     && value.exercises.every((exercise, index) => isObject(exercise)
       && exercise.exerciseId === template.exercises[index].id
       && typeof exercise.completed === 'boolean'
+      && (exercise.substitution === undefined || isObject(exercise.substitution)
+        && typeof exercise.substitution.originalExerciseId === 'string'
+        && typeof exercise.substitution.reason === 'string')
       && Array.isArray(exercise.sets)
       && exercise.sets.length > 0
       && exercise.sets.length <= 20
@@ -289,6 +327,8 @@ function isRecordedSet(value: unknown): value is RecordedSet {
     && (value.weightKg === null || (typeof value.weightKg === 'number' && Number.isFinite(value.weightKg) && value.weightKg >= 0 && value.weightKg <= 1000))
     && (value.reps === null || (typeof value.reps === 'number' && Number.isInteger(value.reps) && value.reps > 0 && value.reps <= 500))
     && typeof value.completed === 'boolean'
+    && (value.leftReps === undefined || value.leftReps === null || Number.isInteger(value.leftReps) && (value.leftReps as number) > 0 && (value.leftReps as number) <= 500)
+    && (value.rightReps === undefined || value.rightReps === null || Number.isInteger(value.rightReps) && (value.rightReps as number) > 0 && (value.rightReps as number) <= 500)
 }
 
 function isWorkoutRecord(value: unknown): value is WorkoutRecord {
@@ -298,6 +338,7 @@ function isWorkoutRecord(value: unknown): value is WorkoutRecord {
     || value.id.length === 0 || value.id.length > 128
     || (value.durationSeconds as number) < 0
     || value.completedAt < value.startedAt
+    || (value.readinessAdjusted !== undefined && typeof value.readinessAdjusted !== 'boolean')
     || !Array.isArray(value.exercises) || value.exercises.length === 0 || value.exercises.length > 20) {
     return false
   }
@@ -311,6 +352,8 @@ function isWorkoutRecord(value: unknown): value is WorkoutRecord {
     && (exercise.targetSets as number) <= 20
     && typeof exercise.targetReps === 'string'
     && exercise.completed === true
+    && (exercise.originalExerciseId === undefined || typeof exercise.originalExerciseId === 'string')
+    && (exercise.substitutionReason === undefined || typeof exercise.substitutionReason === 'string')
     && Array.isArray(exercise.sets)
     && exercise.sets.length > 0
     && exercise.sets.length <= 20
@@ -333,16 +376,35 @@ export function isAppData(value: unknown): value is AppData {
      || (value.timerCountdownWarnings !== undefined && typeof value.timerCountdownWarnings !== 'boolean')
      || (value.timerVibration !== undefined && typeof value.timerVibration !== 'boolean')
     || (value.extrasSessions !== undefined && (!Array.isArray(value.extrasSessions) || !value.extrasSessions.every(isExtraSessionRecord)))
-    || (value.extrasFavourites !== undefined && (!Array.isArray(value.extrasFavourites) || !value.extrasFavourites.every((id) => typeof id === 'string' && Boolean(id))))) {
+    || (value.extrasFavourites !== undefined && (!Array.isArray(value.extrasFavourites) || !value.extrasFavourites.every((id) => typeof id === 'string' && Boolean(id))))
+    || (value.readiness !== undefined && (!Array.isArray(value.readiness) || !value.readiness.every(isReadinessCheckIn)))
+    || (value.recoverySessions !== undefined && (!Array.isArray(value.recoverySessions) || !value.recoverySessions.every(isRecoverySession)))
+    || (value.preferredSubstitutions !== undefined && (!isObject(value.preferredSubstitutions)
+      || !Object.entries(value.preferredSubstitutions).every(([key, candidate]) => typeof candidate === 'string' && validateSubstitutionForExercise(key, candidate))))) {
     return false
   }
+  if ((value.jinGuSessions !== undefined && (!Array.isArray(value.jinGuSessions) || !value.jinGuSessions.every(isJinGuSession)))
+    || (value.activeJinGuSession !== undefined && !(value.activeJinGuSession === null || isActiveJinGuSession(value.activeJinGuSession)))
+    || (value.jinGuHorseStanceTargetSeconds !== undefined && ![20, 25, 30, 35].includes(value.jinGuHorseStanceTargetSeconds as number))
+    || (value.jinGuHorseStanceTargetChangedAt !== undefined && !(value.jinGuHorseStanceTargetChangedAt === null || isTimestamp(value.jinGuHorseStanceTargetChangedAt)))) return false
   const ids = value.history.map((record) => (record as WorkoutRecord).id)
   const activeWorkout = value.currentWorkout as ActiveWorkout | null
   const extras = (value.extrasSessions as ExtraSessionRecord[] | undefined) ?? []
   const favourites = (value.extrasFavourites as string[] | undefined) ?? []
+  const readiness = (value.readiness as ReadinessCheckIn[] | undefined) ?? []
+  const recoverySessions = (value.recoverySessions as RecoverySession[] | undefined) ?? []
+  const preferredSubstitutions = (value.preferredSubstitutions as Record<string, string> | undefined) ?? {}
+  const jinGuSessions = (value.jinGuSessions as JinGuSession[] | undefined) ?? []
+  const activeJinGuSession = (value.activeJinGuSession as ActiveJinGuSession | null | undefined) ?? null
   return new Set(ids).size === ids.length
     && new Set(extras.map((session) => session.id)).size === extras.length
     && new Set(favourites).size === favourites.length
+    && readiness.every(isReadinessCheckIn)
+    && new Set(readiness.map((entry) => entry.date)).size === readiness.length
+    && new Set(recoverySessions.map((entry) => entry.id)).size === recoverySessions.length
+    && isObject(preferredSubstitutions)
+    && new Set(jinGuSessions.map((session) => session.id)).size === jinGuSessions.length
+    && (!activeJinGuSession || !jinGuSessions.some((session) => session.id === activeJinGuSession.id))
     && (!activeWorkout || activeWorkout.workoutId === workouts[value.rotationIndex as number].id)
     && (!activeWorkout || !ids.includes(activeWorkout.id))
     && ((value.timerRunning as boolean) === (value.timerDeadline !== null))
@@ -364,7 +426,9 @@ function isLegacyAppData(value: unknown): value is LegacyAppData {
      || (value.timerCountdownWarnings !== undefined && typeof value.timerCountdownWarnings !== 'boolean')
      || (value.timerVibration !== undefined && typeof value.timerVibration !== 'boolean')
     || (value.extrasSessions !== undefined && (!Array.isArray(value.extrasSessions) || !value.extrasSessions.every(isExtraSessionRecord)))
-    || (value.extrasFavourites !== undefined && (!Array.isArray(value.extrasFavourites) || !value.extrasFavourites.every((id) => typeof id === 'string' && Boolean(id))))) {
+    || (value.extrasFavourites !== undefined && (!Array.isArray(value.extrasFavourites) || !value.extrasFavourites.every((id) => typeof id === 'string' && Boolean(id))))
+    || (value.readiness !== undefined && (!Array.isArray(value.readiness) || !value.readiness.every(isReadinessCheckIn)))
+    || (value.recoverySessions !== undefined && (!Array.isArray(value.recoverySessions) || !value.recoverySessions.every(isRecoverySession)))) {
     return false
   }
   const ids = value.history.map((record) => (record as WorkoutRecord).id)
@@ -414,17 +478,24 @@ function migrateLegacyData(legacy: LegacyAppData): AppData {
     timerAutoStart: legacy.timerAutoStart ?? true,
     timerCountdownWarnings: legacy.timerCountdownWarnings ?? true,
     timerVibration: legacy.timerVibration ?? false,
+    readiness: legacy.readiness ?? [],
+    recoverySessions: legacy.recoverySessions ?? [],
+    preferredSubstitutions: legacy.preferredSubstitutions ?? {},
+    jinGuSessions: legacy.jinGuSessions ?? [],
+    activeJinGuSession: legacy.activeJinGuSession ?? null,
+    jinGuHorseStanceTargetSeconds: legacy.jinGuHorseStanceTargetSeconds ?? 20,
+    jinGuHorseStanceTargetChangedAt: legacy.jinGuHorseStanceTargetChangedAt ?? null,
   }
 }
 
 export function normalizeAppData(value: unknown): AppData | null {
-  if (isAppData(value)) return { ...value, extrasSessions: value.extrasSessions ?? [], extrasFavourites: value.extrasFavourites ?? [], timerAutoStart: value.timerAutoStart ?? true, timerCountdownWarnings: value.timerCountdownWarnings ?? true, timerVibration: value.timerVibration ?? false }
+  if (isAppData(value)) return { ...value, extrasSessions: value.extrasSessions ?? [], extrasFavourites: value.extrasFavourites ?? [], timerAutoStart: value.timerAutoStart ?? true, timerCountdownWarnings: value.timerCountdownWarnings ?? true, timerVibration: value.timerVibration ?? false, readiness: value.readiness ?? [], recoverySessions: value.recoverySessions ?? [], preferredSubstitutions: value.preferredSubstitutions ?? {}, jinGuSessions: value.jinGuSessions ?? [], activeJinGuSession: value.activeJinGuSession ?? null, jinGuHorseStanceTargetSeconds: value.jinGuHorseStanceTargetSeconds ?? 20, jinGuHorseStanceTargetChangedAt: value.jinGuHorseStanceTargetChangedAt ?? null }
   return isLegacyAppData(value) ? migrateLegacyData(value) : null
 }
 
 export async function readAppData(): Promise<{ data: AppData; error: string | null; usable: boolean }> {
   const result = await readPrimarySnapshot('workouts', STORAGE_KEY, isAppData, normalizeAppData, createInitialData())
-  return { ...result, data: { ...result.data, extrasSessions: result.data.extrasSessions ?? [], extrasFavourites: result.data.extrasFavourites ?? [], timerAutoStart: result.data.timerAutoStart ?? true, timerCountdownWarnings: result.data.timerCountdownWarnings ?? true, timerVibration: result.data.timerVibration ?? false } }
+  return { ...result, data: { ...result.data, extrasSessions: result.data.extrasSessions ?? [], extrasFavourites: result.data.extrasFavourites ?? [], timerAutoStart: result.data.timerAutoStart ?? true, timerCountdownWarnings: result.data.timerCountdownWarnings ?? true, timerVibration: result.data.timerVibration ?? false, readiness: result.data.readiness ?? [], recoverySessions: result.data.recoverySessions ?? [], preferredSubstitutions: result.data.preferredSubstitutions ?? {}, jinGuSessions: result.data.jinGuSessions ?? [], activeJinGuSession: result.data.activeJinGuSession ?? null, jinGuHorseStanceTargetSeconds: result.data.jinGuHorseStanceTargetSeconds ?? 20, jinGuHorseStanceTargetChangedAt: result.data.jinGuHorseStanceTargetChangedAt ?? null } }
 }
 
 export function writeAppData(data: AppData): Promise<void> {
@@ -452,6 +523,7 @@ export function createWorkoutRecord(active: ActiveWorkout, completedAt = Date.no
     startedAt: active.startedAt,
     completedAt,
     durationSeconds: Math.max(0, Math.floor((completedAt - active.startedAt) / 1000)),
+    readinessAdjusted: active.readinessAdjusted ?? false,
     exercises: workout.exercises.map((exercise, index) => {
       const state = active.exercises[index]
       return {
@@ -461,11 +533,17 @@ export function createWorkoutRecord(active: ActiveWorkout, completedAt = Date.no
         targetSets: exercise.targetSets,
         targetReps: exercise.targetReps,
         completed: state.completed,
+        ...(state.substitution ? {
+          originalExerciseId: state.substitution.originalExerciseId,
+          substitutionReason: state.substitution.reason,
+        } : {}),
         sets: state.sets.map((set) => ({
           id: set.id,
           weightKg: parseWeight(set.weightKg),
           reps: parseReps(set.reps),
           completed: set.completed,
+          ...(set.leftReps !== undefined ? { leftReps: parseReps(set.leftReps) } : {}),
+          ...(set.rightReps !== undefined ? { rightReps: parseReps(set.rightReps) } : {}),
         })),
       }
     }),

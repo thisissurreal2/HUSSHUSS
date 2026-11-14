@@ -470,11 +470,10 @@ export function PerformanceDashboard({
     <div className="performance-dashboard">
       <div className="page-heading">
         <div>
-          <div className="eyebrow">YOUR PROGRESS · PHASE 3.2</div>
+          <div className="eyebrow">YOUR PROGRESS · TRAINING OVERVIEW</div>
           <h1>Performance, at a glance.</h1>
           <p className="page-subtitle">A personal overview based on completed workouts saved on this device.</p>
         </div>
-        <div className="weekly-chip">ON THIS DEVICE</div>
       </div>
 
       <section className="performance-period-panel panel" aria-label="Performance time period">

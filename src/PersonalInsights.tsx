@@ -186,7 +186,7 @@ export function PersonalInsights({ history }: { history: WorkoutRecord[] }) {
       {storageError && <div className="athletic-alert" role="alert">{storageError}</div>}
       <div className="page-heading">
         <div>
-          <div className="eyebrow">YOUR PROGRESS · PHASE 3.5</div>
+          <div className="eyebrow">YOUR PROGRESS · PERSONAL INSIGHTS</div>
           <h1>Patterns, not pressure.</h1>
           <p className="page-subtitle">Observations from records you entered. No readiness score or coaching claims.</p>
         </div>
@@ -249,13 +249,13 @@ export function PersonalInsights({ history }: { history: WorkoutRecord[] }) {
           <div className="eyebrow">STRENGTH DEVELOPMENT</div>
           <h2>Recent exercise signals</h2>
           {uniqueStrengthChanges.length === 0 ? (
-            <p className="insight-empty">No comparable estimated 1RM changes in this period. Estimates use the existing Phase 3.1 calculation and completed weighted sets.</p>
+            <p className="insight-empty">No comparable estimated 1RM changes in this period. Estimates use completed weighted sets.</p>
           ) : (
             <ul className="insight-list">
               {uniqueStrengthChanges.map((change) => <li key={change.name}><strong>{change.name}</strong><span>{change.detail}</span></li>)}
             </ul>
           )}
-          <p className="insight-footnote">Uses the Phase 3.1 estimated 1RM calculation; changes under 1% are omitted.</p>
+          <p className="insight-footnote">Uses the estimated 1RM calculation; changes under 1% are omitted.</p>
           {recentPRs.length > 0 && (
             <div className="insight-subsection">
               <div className="micro-label">RECENT ESTIMATED 1RM HIGHS</div>

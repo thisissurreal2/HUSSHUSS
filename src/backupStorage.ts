@@ -128,7 +128,7 @@ async function createBundle(): Promise<BackupBundle> {
     version: BACKUP_VERSION,
     exportedAt: new Date().toISOString(),
     data: {
-      workouts: { ...(snapshots.workouts as AppData), extrasSessions: (snapshots.workouts as AppData).extrasSessions ?? [], extrasFavourites: (snapshots.workouts as AppData).extrasFavourites ?? [] },
+      workouts: { ...(snapshots.workouts as AppData), extrasSessions: (snapshots.workouts as AppData).extrasSessions ?? [], extrasFavourites: (snapshots.workouts as AppData).extrasFavourites ?? [], readiness: (snapshots.workouts as AppData).readiness ?? [], recoverySessions: (snapshots.workouts as AppData).recoverySessions ?? [], jinGuSessions: (snapshots.workouts as AppData).jinGuSessions ?? [], activeJinGuSession: (snapshots.workouts as AppData).activeJinGuSession ?? null, jinGuHorseStanceTargetSeconds: (snapshots.workouts as AppData).jinGuHorseStanceTargetSeconds ?? 20, jinGuHorseStanceTargetChangedAt: (snapshots.workouts as AppData).jinGuHorseStanceTargetChangedAt ?? null },
       measurements: snapshots.measurements,
       athletic: snapshots.athletic,
     },
@@ -397,7 +397,7 @@ export async function restoreBackup(bundle: BackupBundle): Promise<void> {
 
   window.localStorage.setItem(RESTORE_SAFETY_KEY, recoveryPoint)
   await queueLocalSnapshots([
-    { category: 'workouts', snapshot: { ...bundle.data.workouts, extrasSessions: bundle.data.workouts.extrasSessions ?? [], extrasFavourites: bundle.data.workouts.extrasFavourites ?? [] } },
+    { category: 'workouts', snapshot: { ...bundle.data.workouts, extrasSessions: bundle.data.workouts.extrasSessions ?? [], extrasFavourites: bundle.data.workouts.extrasFavourites ?? [], readiness: bundle.data.workouts.readiness ?? [], recoverySessions: bundle.data.workouts.recoverySessions ?? [] } },
     { category: 'measurements', snapshot: bundle.data.measurements },
     { category: 'athletic', snapshot: bundle.data.athletic },
   ])
