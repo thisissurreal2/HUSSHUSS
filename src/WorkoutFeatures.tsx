@@ -330,7 +330,10 @@ export function WorkoutSession({
               <PreviousPerformance
                 history={history}
                 exercise={(() => {
-                  const normalPrescription = getWorkout(workout.id).exercises.find((item) => item.id === exercise.id) ?? exercise
+                  const sourceExerciseId = state.substitution?.originalExerciseId ?? exercise.id
+                  const normalPrescription = workout.exercises.find((item) => item.id === sourceExerciseId)
+                    ?? getWorkout(workout.id).exercises.find((item) => item.id === sourceExerciseId)
+                    ?? exercise
                   return { exerciseId: normalPrescription.id, name: normalPrescription.name, targetSets: normalPrescription.targetSets, targetReps: normalPrescription.targetReps }
                 })()}
                 activeExercise={state}

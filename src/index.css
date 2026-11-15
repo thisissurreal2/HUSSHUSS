@@ -33,8 +33,12 @@
   --space-3: 12px;
   --space-4: 16px;
   --space-5: 24px;
-  --radius-control: 4px;
-  --radius-panel: 6px;
+  --space-6: 32px;
+  --radius-control: 8px;
+  --radius-panel: 12px;
+  --radius-feature: 16px;
+  --line-soft: rgba(153, 165, 180, 0.17);
+  --surface-shadow: 0 10px 26px rgba(0, 0, 0, 0.16);
   --target-mobile: 44px;
 }
 

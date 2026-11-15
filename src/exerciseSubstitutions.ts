@@ -3,7 +3,7 @@ import { workouts, type Exercise } from './workouts'
 import type { ActiveWorkout, WorkoutRecord } from './workoutStorage'
 
 export type SubstitutionReason = 'equipment-unavailable' | 'machine-occupied' | 'uncomfortable' | 'variation' | 'pain'
-export type MovementPattern = 'horizontal-push' | 'vertical-push' | 'shoulder-isolation' | 'elbow-extension' | 'squat' | 'hip-hinge' | 'vertical-pull' | 'horizontal-pull' | 'rear-delt-isolation' | 'elbow-flexion' | 'trunk-flexion' | 'anti-rotation' | 'unilateral-squat' | 'carry' | 'balance' | 'anti-extension'
+export type MovementPattern = 'horizontal-push' | 'vertical-push' | 'shoulder-isolation' | 'elbow-extension' | 'squat' | 'hip-hinge' | 'vertical-pull' | 'horizontal-pull' | 'rear-delt-isolation' | 'elbow-flexion' | 'knee-flexion' | 'calf-raise' | 'trunk-flexion' | 'anti-rotation' | 'unilateral-squat' | 'carry' | 'balance' | 'anti-extension'
 export type Equipment = 'barbell' | 'dumbbells' | 'cable' | 'machine' | 'bodyweight' | 'band' | 'open-space' | 'bench'
 export type ExerciseType = 'compound' | 'isolation' | 'bodyweight' | 'timed' | 'unilateral'
 
@@ -69,6 +69,10 @@ const definitions: ExerciseSubstitutionDefinition[] = [
   { id: 'supported-single-leg-balance', name: 'Supported Single-Leg Balance', primaryMuscles: [], secondaryMuscles: [], equipment: ['bodyweight', 'open-space'], pattern: 'balance', type: 'unilateral', targetReps: '30 seconds per side', difficulty: 'Use fingertip support as needed.' },
   { id: 'plank', name: 'Plank', primaryMuscles: ['core'], secondaryMuscles: [], equipment: ['bodyweight'], pattern: 'anti-extension', type: 'timed', targetReps: '45–60 seconds', difficulty: 'Stop the hold when you can no longer maintain a comfortable position.' },
   { id: 'dead-bug', name: 'Dead Bug', primaryMuscles: ['core'], secondaryMuscles: [], equipment: ['bodyweight'], pattern: 'anti-extension', type: 'bodyweight', targetReps: '8–12 per side', difficulty: 'Use a slow range while keeping the trunk controlled.' },
+  { id: 'standing-cable-leg-curls', name: 'Standing Cable Leg Curls', primaryMuscles: ['hamstrings'], secondaryMuscles: [], equipment: ['cable'], pattern: 'knee-flexion', type: 'isolation', targetReps: '10–15', difficulty: 'Use an ankle cuff, steady support, and a controlled range.' },
+  { id: 'band-leg-curls', name: 'Standing Band Leg Curls', primaryMuscles: ['hamstrings'], secondaryMuscles: [], equipment: ['band'], pattern: 'knee-flexion', type: 'isolation', targetReps: '10–15', difficulty: 'Anchor the band securely and keep the movement controlled.' },
+  { id: 'standing-calf-raises', name: 'Standing Calf Raises', primaryMuscles: ['calves'], secondaryMuscles: [], equipment: ['machine', 'bodyweight'], pattern: 'calf-raise', type: 'isolation', targetReps: '12–15', difficulty: 'Use a support if needed and move through a comfortable range.' },
+  { id: 'single-leg-calf-raises', name: 'Single-Leg Calf Raises', primaryMuscles: ['calves'], secondaryMuscles: [], equipment: ['bodyweight', 'open-space'], pattern: 'calf-raise', type: 'unilateral', targetReps: '8–10 per leg', difficulty: 'Hold a stable support and switch legs with control.' },
 ]
 
 export const exerciseSubstitutionCatalogue = definitions

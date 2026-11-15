@@ -31,7 +31,7 @@ import {
   type ActiveWorkout,
   type AppData,
 } from './workoutStorage'
-import { getLowerBodyExercise, getWorkout, workouts, type Workout, type WorkoutId } from './workouts'
+import { getLowerBodyExercises, workouts, type Workout, type WorkoutId } from './workouts'
 import { ExtrasPage } from './ExtrasPage'
 import { JinGuPage } from './JinGu'
 import { createActiveJinGuSession, type ActiveJinGuSession, type JinGuSession } from './jinGuData'
@@ -47,6 +47,7 @@ import {
   type ExtraSessionRecord,
 } from './extras'
 import './App.css'
+import './ui-polish.css'
 
 type IconName =
   | 'activity'
@@ -342,7 +343,7 @@ function App() {
     const current = dataRef.current.currentWorkout
     if (!current) return
 
-    const name = getWorkout(current.workoutId).name
+    const name = current.template.name
     const recoveryMessage = selectRecovery
       ? ' Today will be marked as a recovery day.'
       : ''
@@ -1341,7 +1342,7 @@ function Overview({
       ? 'recovery'
       : 'planned'
 
-  const lowerBodyExercise = getLowerBodyExercise(workout)
+  const lowerBodyExercises = getLowerBodyExercises(workout)
 
   return (
     <>
@@ -1510,10 +1511,10 @@ function Overview({
 
             <div>
               <span className="micro-label">
-                ONE LOWER-BODY MOVEMENT
+                {lowerBodyExercises.length === 1 ? 'LOWER-BODY MOVEMENT' : 'LOWER-BODY EMPHASIS'}
               </span>
               <strong>
-                {lowerBodyExercise.name} · {lowerBodyExercise.focus}
+                {lowerBodyExercises.map((exercise) => exercise.name).join(' · ')}
               </strong>
             </div>
           </div>
@@ -1703,11 +1704,10 @@ function RotationPage({
 
               <div>
                 <span className="micro-label">
-                  LOWER-BODY MOVEMENT
+                  {getLowerBodyExercises(item).length === 1 ? 'LOWER-BODY MOVEMENT' : 'LOWER-BODY EMPHASIS'}
                 </span>
                 <strong>
-                  {getLowerBodyExercise(item).name} ·{' '}
-                  {getLowerBodyExercise(item).focus}
+                  {getLowerBodyExercises(item).map((exercise) => exercise.name).join(' · ')}
                 </strong>
               </div>
             </div>

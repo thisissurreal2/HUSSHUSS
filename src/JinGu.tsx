@@ -38,6 +38,11 @@ export function JinGuPage({ history, activeSession, horseStanceTargetSeconds, ho
   const [notes, setNotes] = useState('')
   const progressionReadiness = readinessCategory === 'missing' ? undefined : readinessCategory
   const nextTarget = getNextHorseStanceTarget(horseStanceTargetSeconds, history, now, horseStanceTargetChangedAt, progressionReadiness)
+  const latestPractice = [...history].sort((a, b) => b.completedAt - a.completedAt)[0]
+  const todayKey = getLocalDateKey()
+  const todayPractice = history.find((item) => item.date === todayKey)
+  const routine = getJinGuRoutine(horseStanceTargetSeconds)
+  const todayCompletedCount = todayPractice?.completedExerciseIds.length ?? 0
 
   useEffect(() => {
     const initial = window.setTimeout(() => setNow(Date.now()), 0)
@@ -94,13 +99,14 @@ export function JinGuPage({ history, activeSession, horseStanceTargetSeconds, ho
         : activeSession ? <JinGuSessionRunner key={activeSession.id} session={activeSession} onUpdate={onUpdate} onFinish={finish} busy={busy} />
           : <>
             <section className="jingu-start-brief">
-              <div><span className="eyebrow">CURRENT MA BU TARGET</span><strong>{horseStanceTargetSeconds}<small>sec · 2 holds</small></strong></div>
-              <p>This beginner routine uses only the agreed standing preparation, stances, Yi Jin Jing-inspired movements, balance practice and Wuji standing. It does not replace or change your gym programme.</p>
+              <div className="jingu-practice-target"><span className="eyebrow">CURRENT MA BU TARGET</span><strong>{horseStanceTargetSeconds}<small>sec · 2 holds</small></strong><span className="jingu-duration-label">25–30 MIN · DAILY PRACTICE</span></div>
+              <div className="jingu-practice-intro"><span className="eyebrow">MOVE · BREATHE · SETTLE</span><p>A quiet sequence of standing preparation, traditional stances, Yi Jin Jing-inspired movement, balance and Wuji standing. Move at a comfortable pace; this practice does not change your gym programme.</p><div className="jingu-overview-progress" role="progressbar" aria-label="Today's practice progress" aria-valuemin={0} aria-valuemax={routine.length} aria-valuenow={todayCompletedCount}><div className="jingu-overview-progress-label">TODAY <strong>{todayCompletedCount} / {routine.length} MOVEMENTS</strong></div><div className="jingu-overview-progress-segments">{jinGuSections.map((section, index) => { const sectionExercises = routine.filter((item) => item.section === section.id); const completed = sectionExercises.filter((item) => todayPractice?.completedExerciseIds.includes(item.id)).length; return <span key={section.id} className={completed === sectionExercises.length ? 'done' : completed ? 'partial' : ''} title={`${section.title}: ${completed} of ${sectionExercises.length}`}><i />{String(index + 1).padStart(2, '0')}</span> })}</div></div></div>
             </section>
             {readinessCategory && readinessCategory !== 'ready' && readinessCategory !== 'missing' && <p className="jingu-light-note" role="status">Today’s readiness suggests a lighter approach. Choose light practice or rest; neither option changes your gym rotation.</p>}
             <div className="jingu-start-actions">
-              <button className="button-primary" type="button" disabled={busy} onClick={() => void start(false)}>Start full practice <span aria-hidden="true">→</span></button>
+              <button className="button-primary" type="button" disabled={busy} onClick={() => void start(false)}>Start practice <span aria-hidden="true">→</span></button>
               <button className="button-secondary" type="button" disabled={busy} onClick={() => void start(true)}>Start light practice</button>
+              <p className="jingu-last-practice">{latestPractice ? <>LAST PRACTICE <strong>{formatDate(latestPractice.date)}</strong><span>{latestPractice.completedExerciseIds.length} movements · {formatDuration(latestPractice.durationSeconds)}</span></> : <>PRACTICE RECORD <strong>Your first session starts here</strong><span>Saved sessions and progress appear in History &amp; progress.</span></>}</p>
             </div>
             <div className="jingu-routine-map">
               {jinGuSections.map((section, sectionIndex) => {
@@ -131,6 +137,8 @@ function JinGuSessionRunner({ session, onUpdate, onFinish, busy }: { session: Ac
     ? session.timerRemainingSeconds
     : Math.max(0, Math.ceil((session.timerDeadline - now) / 1000))
   const doneCount = session.completedExerciseIds.length
+  const timerDisplay = timerTarget === null ? 0 : session.timerDeadline !== null || session.timerRemainingSeconds > 0 ? remaining : timerTarget
+  const timerProgress = timerTarget ? Math.max(0, Math.min(1, timerDisplay / timerTarget)) : 0
 
   useEffect(() => {
     const initial = window.setTimeout(() => setNow(Date.now()), 0)
@@ -181,14 +189,14 @@ function JinGuSessionRunner({ session, onUpdate, onFinish, busy }: { session: Ac
   return <div className="jingu-session">
     <div className="jingu-session-progress"><div><span>DAILY SEQUENCE</span><b>{session.currentExerciseIndex + 1} / {routine.length}</b></div><div className="jingu-progress-track"><i style={{ width: `${Math.round(doneCount / routine.length * 100)}%` }} /></div><small>{doneCount} movements completed{session.skippedExerciseIds.length ? ` · ${session.skippedExerciseIds.length} skipped` : ''}{session.lightPractice ? ' · light practice' : ''}</small></div>
     <div className="jingu-session-layout">
-      <article className="jingu-current-movement">
+      <article className="jingu-current-movement" key={exercise.id}>
         <span className="eyebrow">{jinGuSections.find((item) => item.id === exercise.section)?.title}</span>
         <h2>{exercise.name}</h2>
         <p className="jingu-movement-description">{exercise.description}</p>
         <div className="jingu-movement-target"><span>TODAY’S TARGET</span><strong>{getJinGuTargetLabel(target)}</strong></div>
         <ol className="jingu-instructions">{exercise.instructions.map((instruction) => <li key={instruction}>{instruction}</li>)}</ol>
         <details className="jingu-safety"><summary>Technique and safety</summary><p>{exercise.safety}</p>{exercise.restSeconds > 0 && <p>Rest about {exercise.restSeconds} seconds between efforts, or longer until comfortable.</p>}</details>
-        {timerTarget !== null && <div className="jingu-timer" aria-live="polite"><div><span>{session.timerDeadline === null ? 'OPTIONAL HOLD TIMER' : remaining === 0 ? 'TIMER COMPLETE' : 'TIME REMAINING'}</span><strong>{formatClock(session.timerDeadline !== null || session.timerRemainingSeconds > 0 ? remaining : timerTarget)}</strong></div><button className="button-secondary" type="button" disabled={busy} onClick={session.timerDeadline === null ? startTimer : remaining === 0 ? resetTimer : pauseTimer}>{session.timerDeadline !== null ? remaining === 0 ? 'Reset timer' : 'Pause' : session.timerRemainingSeconds > 0 ? 'Resume' : 'Start timer'}</button>{timerTarget === 180 && <small>You can finish the quiet standing period whenever you are ready.</small>}</div>}
+        {timerTarget !== null && <div className="jingu-timer" aria-live="polite"><div className="jingu-timer-ring" role="img" aria-label={`${formatClock(timerDisplay)} ${session.timerDeadline === null ? 'remaining before starting' : 'remaining'}`}><svg viewBox="0 0 100 100" aria-hidden="true"><circle className="jingu-timer-ring-track" cx="50" cy="50" r="45" /><circle className="jingu-timer-ring-progress" cx="50" cy="50" r="45" style={{ strokeDashoffset: `${283 * (1 - timerProgress)}` }} /></svg><div><span>{session.timerDeadline === null ? 'HOLD TIMER' : remaining === 0 ? 'COMPLETE' : 'REMAINING'}</span><strong>{formatClock(timerDisplay)}</strong></div></div><button className="button-secondary" type="button" disabled={busy} onClick={session.timerDeadline === null ? startTimer : remaining === 0 ? resetTimer : pauseTimer}>{session.timerDeadline !== null ? remaining === 0 ? 'Reset timer' : 'Pause' : session.timerRemainingSeconds > 0 ? 'Resume' : 'Start timer'}</button>{timerTarget === 180 && <small>You can finish the quiet standing period whenever you are ready.</small>}</div>}
         {error && <p className="jingu-error" role="alert">{error}</p>}
         <div className="jingu-movement-actions"><button className="button-secondary" type="button" disabled={busy || session.currentExerciseIndex === 0} onClick={() => move(session.currentExerciseIndex - 1)}>← Previous</button><button className="button-text" type="button" disabled={busy} onClick={markSkipped}>Skip movement</button><button className="button-primary" type="button" disabled={busy} onClick={markCompleted}>{session.completedExerciseIds.includes(exercise.id) ? 'Completed ✓' : 'Mark complete'}</button><button className="button-secondary" type="button" disabled={busy || session.currentExerciseIndex === routine.length - 1} onClick={() => move(session.currentExerciseIndex + 1)}>Next →</button></div>
       </article>
@@ -221,8 +229,10 @@ function JinGuHistory({ history, now, currentTarget, nextTarget, onApplyTarget, 
 }
 
 function JinGuFinishSummary({ session, onReturn }: { session: JinGuSession; onReturn: () => void }) {
-  return <section className="jingu-finish-summary"><span className="eyebrow">PRACTICE SAVED · {formatDate(session.date)}</span><h2>{session.status === 'completed' ? 'A complete practice.' : 'Practice recorded.'}</h2><p>{session.completedExerciseIds.length} movements completed · {session.skippedExerciseIds.length} skipped · {Math.floor(session.durationSeconds / 60)} minutes{session.lightPractice ? ' · light practice' : ''}</p><button className="button-primary" type="button" onClick={onReturn}>Back to Jin Gu</button></section>
+  return <section className="jingu-finish-summary"><span className="eyebrow">PRACTICE SAVED · {formatDate(session.date)}</span><div className="jingu-finish-mark" aria-hidden="true">✓</div><h2>{session.status === 'completed' ? 'A complete practice.' : 'Practice recorded.'}</h2><div className="jingu-finish-stats"><div><span>DURATION</span><strong>{formatDuration(session.durationSeconds)}</strong></div><div><span>MOVEMENTS</span><strong>{session.completedExerciseIds.length}<small> completed</small></strong></div><div><span>SKIPPED</span><strong>{session.skippedExerciseIds.length}</strong></div></div><p>{session.lightPractice ? 'Light practice · ' : ''}{session.status === 'completed' ? 'Your full sequence is in your practice record.' : 'Your partial session is safely in your practice record.'}</p><button className="button-primary" type="button" onClick={onReturn}>Return to Jin Gu</button></section>
 }
 
 function formatClock(seconds: number) { return `${Math.floor(seconds / 60).toString().padStart(2, '0')}:${(seconds % 60).toString().padStart(2, '0')}` }
+function formatDuration(seconds: number) { const minutes = Math.floor(seconds / 60); const remainder = seconds % 60; return minutes ? `${minutes} min${remainder ? ` ${remainder} sec` : ''}` : `${remainder} sec` }
 function formatDate(date: string) { return new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' }).format(new Date(`${date}T12:00:00`)) }
+function getLocalDateKey() { const date = new Date(); return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}` }

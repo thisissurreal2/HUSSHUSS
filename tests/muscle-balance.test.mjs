@@ -193,15 +193,15 @@ test('no workouts means no insights and no low-confidence flag', () => {
   assert.equal(result.current.totalWeightedSets, 0)
 })
 
-test('insights report related-pair ratios and the calf rotation gap from real data', () => {
+test('insights report related-pair ratios and the new calf rotation coverage from real data', () => {
   const history = [1, 3, 5, 7].map((daysAgo, index) => record(`r${index}`, daysAgo, [
     exercise('barbell-bench-press', [set(`a${index}`, 5), set(`b${index}`, 5), set(`c${index}`, 5)]),
     exercise('romanian-deadlift', [set(`d${index}`, 8)]),
   ]))
   const result = muscleBalance.analyzeMuscleBalance(history, '30d', NOW)
   const ids = result.insights.map((item) => item.id)
-  assert.ok(ids.includes('gap-rotation'))
-  assert.ok(result.insights.find((item) => item.id === 'gap-rotation').text.includes('Calves'))
+  assert.ok(ids.includes('gap-covered'))
+  assert.match(result.insights.find((item) => item.id === 'gap-covered').text, /calves/i)
   assert.ok(!ids.includes('pair-biceps-triceps'), 'zero-exposure pairs are reported as gaps, not ratios')
   assert.ok(ids.includes('pair-chest-back'))
 })
@@ -222,7 +222,7 @@ test('change insights compare against the previous equal window', () => {
 })
 
 test('rotation coverage reflects the mapped exercises', () => {
-  assert.equal(muscleBalance.rotationCoversMuscle('calves'), false)
+  assert.equal(muscleBalance.rotationCoversMuscle('calves'), true)
   assert.equal(muscleBalance.rotationCoversMuscle('hamstrings'), true)
   assert.equal(muscleBalance.rotationCoversMuscle('chest'), true)
 })

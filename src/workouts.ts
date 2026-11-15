@@ -187,10 +187,10 @@ export const workouts: Workout[] = [
   },
   {
     id: 'core',
-    name: 'Core & Athleticism',
-    focus: 'Trunk · stability · balance',
-    description: 'Core control, balance, carries, and one measured leg movement.',
-    duration: '30–40 min',
+    name: 'Core & Legs',
+    focus: 'Core · legs · loaded carries',
+    description: 'Core-first training with carries and focused lower-body strength work.',
+    duration: '35–45 min',
     warmup: [
       { id: 'light-cardio', name: 'Light cycling or treadmill · 3–5 min', instructions: 'Choose an easy pace that warms you up without tiring your legs.' },
       { id: 'leg-swings', name: 'Leg swings · 10 per leg', instructions: 'Hold support and swing each leg gently through a comfortable range.' },
@@ -201,61 +201,72 @@ export const workouts: Workout[] = [
     ],
     exercises: [
       {
-        id: 'hanging-knee-raises',
-        name: 'Hanging Knee Raises',
-        focus: 'Core',
-        instructions: 'Use a secure, comfortable hang. Raise and lower your knees without swinging; use a captain’s chair if preferred.',
-        targetSets: 3,
-        targetReps: '10–15',
-      },
-      {
         id: 'cable-crunches',
         name: 'Cable Crunches',
         focus: 'Core',
         instructions: 'Kneel comfortably and curl your ribs toward your pelvis without pulling on your neck.',
         targetSets: 3,
-        targetReps: '12–15',
+        targetReps: '10–15',
+      },
+      {
+        id: 'hanging-knee-raises',
+        name: 'Hanging Knee Raises',
+        focus: 'Core',
+        instructions: 'Use a secure, comfortable hang. Raise and lower your knees without swinging; use a captain’s chair if preferred.',
+        targetSets: 2,
+        targetReps: '8–12',
       },
       {
         id: 'pallof-press',
         name: 'Pallof Press',
         focus: 'Core stability',
         instructions: 'Stand tall, press the handle away from your chest, and resist rotation. Complete the target on each side.',
-        targetSets: 3,
+        targetSets: 2,
         targetReps: '10 per side',
+      },
+      {
+        id: 'farmer-carries',
+        name: 'Farmer Carries',
+        focus: 'Grip · trunk · loaded carry',
+        instructions: 'Carry manageable weights over a clear 30–40 metre route with steady steps, relaxed shoulders, and an upright posture.',
+        targetSets: 3,
+        targetReps: '30–40 metres',
+      },
+      {
+        id: 'leg-press',
+        name: 'Leg Press',
+        focus: 'Quads',
+        instructions: 'Use a comfortable depth and keep your hips supported against the pad. Do not lock your knees.',
+        targetSets: 3,
+        targetReps: '8–12',
+        isLowerBody: true,
       },
       {
         id: 'bulgarian-split-squats',
         name: 'Bulgarian Split Squats',
         focus: 'Quads · glutes',
         instructions: 'Use a stable support if helpful. Keep the range and stance comfortable and complete each leg with control.',
-        targetSets: 3,
+        targetSets: 2,
         targetReps: '8 per leg',
         isLowerBody: true,
       },
       {
-        id: 'farmer-carries',
-        name: 'Farmer Carries',
-        focus: 'Grip · trunk',
-        instructions: 'Carry manageable weights with relaxed shoulders, steady steps, and an upright posture.',
-        targetSets: 3,
-        targetReps: '30–40 seconds',
+        id: 'standing-cable-leg-curls',
+        name: 'Standing Cable Leg Curls',
+        focus: 'Hamstrings',
+        instructions: 'Use an ankle cuff and hold a stable support. Curl through a comfortable range without arching or swinging.',
+        targetSets: 2,
+        targetReps: '10–15',
+        isLowerBody: true,
       },
       {
-        id: 'single-leg-balance',
-        name: 'Single-Leg Balance',
-        focus: 'Balance',
-        instructions: 'Stand near support, balance comfortably, and switch sides. Keep the floor and surroundings clear.',
+        id: 'standing-calf-raises',
+        name: 'Standing Calf Raises',
+        focus: 'Calves',
+        instructions: 'Stand tall near support. Rise onto the balls of your feet, pause, then lower with control.',
         targetSets: 2,
-        targetReps: '30 seconds per side',
-      },
-      {
-        id: 'plank',
-        name: 'Plank',
-        focus: 'Trunk',
-        instructions: 'Keep a comfortable straight line and breathe steadily. Stop if your position or comfort changes.',
-        targetSets: 2,
-        targetReps: '45–60 seconds',
+        targetReps: '12–15',
+        isLowerBody: true,
       },
     ],
     cooldown: [
@@ -276,10 +287,10 @@ export function getWorkout(workoutId: WorkoutId): Workout {
   return workout
 }
 
-export function getLowerBodyExercise(workout: Workout): Exercise {
+export function getLowerBodyExercises(workout: Workout): Exercise[] {
   const lowerBodyExercises = workout.exercises.filter((exercise) => exercise.isLowerBody)
-  if (lowerBodyExercises.length !== 1) {
-    throw new Error(`${workout.name} must contain exactly one lower-body exercise.`)
+  if (lowerBodyExercises.length === 0) {
+    throw new Error(`${workout.name} must contain at least one lower-body exercise.`)
   }
-  return lowerBodyExercises[0]
+  return lowerBodyExercises
 }

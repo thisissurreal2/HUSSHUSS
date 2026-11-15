@@ -28,9 +28,9 @@ npm run lint
 
 ## Phase 2 features
 
-- Push → Pull → Core & Athleticism rotation with one lower-body exercise in each workout.
+- Push → Pull → Core & Legs rotation.
 - Start, resume, cancel, and complete sessions. A session can only be completed after every exercise is marked done.
-- Personalised Push, Pull, and Core & Athleticism routines with exercise-specific set and rep/time targets.
+- Personalised Push, Pull, and Core & Legs routines with exercise-specific set and rep/time targets.
 - Individually checkable warm-up and optional cool-down/stretch checklists with saved progress.
 - Log kilograms and reps for each set, add or remove sets, edit values, and mark sets complete.
 - Rest timer presets of 30, 60, 90, 120, and 180 seconds, with start, pause, resume, reset, and browser sound/notification alerts where supported.

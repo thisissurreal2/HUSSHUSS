@@ -109,7 +109,7 @@ export const exerciseMuscleMap: Record<string, ExerciseMuscleEntry> = {
     notes: 'Forearms are not on the radar.',
   },
 
-  // ── Current rotation: Core & Athleticism ────────────────────────────────
+  // ── Current rotation: Core & Legs ───────────────────────────────────────
   'hanging-knee-raises': {
     weights: { core: 1 },
     notes: 'Hip flexors are not on the radar.',
@@ -135,6 +135,10 @@ export const exerciseMuscleMap: Record<string, ExerciseMuscleEntry> = {
     excluded: true,
     reason: 'Balance holds are low-load; excluded so they do not inflate calves, glutes or core.',
   },
+  'standing-cable-leg-curls': { weights: { hamstrings: 1 } },
+  'band-leg-curls': { weights: { hamstrings: 1 } },
+  'standing-calf-raises': { weights: { calves: 1 } },
+  'single-leg-calf-raises': { weights: { calves: 1 } },
   'machine-chest-press': { weights: { chest: 1, triceps: 0.5, shoulders: 0.5 } },
   'push-ups': { weights: { chest: 1, triceps: 0.5, shoulders: 0.5, core: 0.25 } },
   'incline-machine-press': { weights: { chest: 1, shoulders: 0.5, triceps: 0.5 } },

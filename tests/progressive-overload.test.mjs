@@ -5,11 +5,13 @@ import { createServer } from 'vite'
 let vite
 let analytics
 let storage
+let workouts
 
 before(async () => {
   vite = await createServer({ server: { middlewareMode: true, hmr: false }, appType: 'custom' })
   analytics = await vite.ssrLoadModule('/src/strengthAnalytics.ts')
   storage = await vite.ssrLoadModule('/src/workoutStorage.ts')
+  workouts = await vite.ssrLoadModule('/src/workouts.ts')
 })
 
 after(async () => { await vite?.close() })
@@ -173,7 +175,7 @@ test('timed and bodyweight previous values prefill without inventing load', () =
   assert.equal(pullup.sets[0].reps, '8')
 })
 
-test('unilateral performance stores each side and uses the weaker side for progression', () => {
+test('per-side performance stores each side and uses the weaker side for progression', () => {
   const exercise = { exerciseId: 'single-leg-balance', name: 'Single-Leg Balance', targetSets: 2, targetReps: '30 seconds per side' }
   const previous = record('balance', 1000, exercise.exerciseId, exercise.name, 2, exercise.targetReps, [[null, 25], [null, 30]])
   previous.exercises[0].sets[0].leftReps = 30
@@ -183,7 +185,9 @@ test('unilateral performance stores each side and uses the weaker side for progr
   const plan = analytics.getProgressionPlan([previous], exercise)
   assert.equal(plan.metricType, 'per-side-time')
   assert.match(plan.reason, /weaker side/)
-  const active = storage.createActiveWorkout('core', 2000, [previous])
+  const legacyBalanceExercise = { id: exercise.exerciseId, name: exercise.name, focus: 'Balance', instructions: 'Legacy saved target.', targetSets: 2, targetReps: exercise.targetReps }
+  const legacyCoreTemplate = { ...workouts.getWorkout('core'), name: 'Core & Athleticism', exercises: [legacyBalanceExercise] }
+  const active = storage.createActiveWorkout('core', 2000, [previous], legacyCoreTemplate)
   const state = active.exercises.find((item) => item.exerciseId === exercise.exerciseId)
   assert.equal(state.sets[0].leftReps, '30')
   assert.equal(state.sets[0].rightReps, '25')
