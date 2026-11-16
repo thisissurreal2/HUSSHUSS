@@ -1511,10 +1511,10 @@ function Overview({
 
             <div>
               <span className="micro-label">
-                {lowerBodyExercises.length === 1 ? 'LOWER-BODY MOVEMENT' : 'LOWER-BODY EMPHASIS'}
+                {lowerBodyExercises.length === 0 ? 'SESSION EMPHASIS' : lowerBodyExercises.length === 1 ? 'LOWER-BODY MOVEMENT' : 'LOWER-BODY EMPHASIS'}
               </span>
               <strong>
-                {lowerBodyExercises.map((exercise) => exercise.name).join(' · ')}
+                {lowerBodyExercises.length ? lowerBodyExercises.map((exercise) => exercise.name).join(' · ') : workout.focus}
               </strong>
             </div>
           </div>
@@ -1704,10 +1704,10 @@ function RotationPage({
 
               <div>
                 <span className="micro-label">
-                  {getLowerBodyExercises(item).length === 1 ? 'LOWER-BODY MOVEMENT' : 'LOWER-BODY EMPHASIS'}
+                  {getLowerBodyExercises(item).length === 0 ? 'SESSION EMPHASIS' : getLowerBodyExercises(item).length === 1 ? 'LOWER-BODY MOVEMENT' : 'LOWER-BODY EMPHASIS'}
                 </span>
                 <strong>
-                  {getLowerBodyExercises(item).map((exercise) => exercise.name).join(' · ')}
+                  {getLowerBodyExercises(item).length ? getLowerBodyExercises(item).map((exercise) => exercise.name).join(' · ') : item.focus}
                 </strong>
               </div>
             </div>

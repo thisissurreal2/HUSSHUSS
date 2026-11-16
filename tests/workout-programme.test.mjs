@@ -7,6 +7,7 @@ let workouts
 let storage
 let analytics
 let substitutions
+let muscleMap
 
 before(async () => {
   vite = await createServer({ server: { middlewareMode: true, hmr: false }, appType: 'custom' })
@@ -14,23 +15,106 @@ before(async () => {
   storage = await vite.ssrLoadModule('/src/workoutStorage.ts')
   analytics = await vite.ssrLoadModule('/src/strengthAnalytics.ts')
   substitutions = await vite.ssrLoadModule('/src/exerciseSubstitutions.ts')
+  muscleMap = await vite.ssrLoadModule('/src/muscleMap.ts')
 })
 
 after(async () => { await vite?.close() })
 
-test('rotation is Push, Pull, Core & Legs and the next workout begins at Push', () => {
+const rows = (workout) => workout.exercises.map(({ id, name, targetSets, targetReps }) => [id, name, targetSets, targetReps])
+
+test('rotation remains Push → Pull → Core & Legs and wraps to Push', () => {
   assert.deepEqual(workouts.workouts.map(({ id, name }) => [id, name]), [
     ['push', 'Push'], ['pull', 'Pull'], ['core', 'Core & Legs'],
   ])
-  const initial = storage.createInitialData()
-  assert.equal(workouts.workouts[initial.rotationIndex].name, 'Push')
+  assert.equal(workouts.workouts[storage.createInitialData().rotationIndex].name, 'Push')
   assert.equal(workouts.workouts[(2 + 1) % workouts.workouts.length].name, 'Push')
+  assert.deepEqual(workouts.getLowerBodyExercises(workouts.getWorkout('push')), [])
+  assert.deepEqual(workouts.getLowerBodyExercises(workouts.getWorkout('pull')), [])
 })
 
-test('Core & Legs contains exactly the requested eight exercises and targets', () => {
+test('Push has the exact chest, shoulder and triceps list with no leg press or barbell overhead press', () => {
+  assert.deepEqual(rows(workouts.getWorkout('push')), [
+    ['barbell-bench-press', 'Bench Press', 3, '5–8'],
+    ['incline-dumbbell-press', 'Incline Dumbbell Press', 3, '8–12'],
+    ['pec-deck', 'Pec Deck', 3, '10–15'],
+    ['machine-shoulder-press', 'Machine Shoulder Press', 3, '8–12'],
+    ['dumbbell-lateral-raises', 'Lateral Raises', 3, '12–15'],
+    ['cable-tricep-pushdowns', 'Cable Tricep Pushdowns', 3, '10–15'],
+    ['overhead-cable-tricep-extensions', 'Overhead Cable Extensions', 2, '10–12'],
+  ])
+})
+
+test('Pull prioritizes weighted pull-ups and has the exact six requested exercises', () => {
+  const pull = workouts.getWorkout('pull')
+  assert.deepEqual(rows(pull), [
+    ['pull-ups', 'Weighted Pull-Ups', 3, '5–8'],
+    ['smith-machine-bent-over-row', 'Smith Machine Bent-Over Row', 3, '6–8'],
+    ['chest-supported-rows', 'Chest-Supported Row', 3, '8–12'],
+    ['reverse-pec-deck', 'Reverse Pec Deck', 2, '12–15'],
+    ['preacher-curls', 'Preacher Curls', 3, '8–12'],
+    ['hammer-curls', 'Hammer Curls', 2, '10–12'],
+  ])
+  assert.ok(!pull.exercises.some((item) => ['single-arm-cable-rows', 'romanian-deadlift', 'incline-dumbbell-curls'].includes(item.id)))
+
+  const active = storage.createActiveWorkout('pull', 2000)
+  assert.equal(analytics.getExerciseMetricType('pull-ups', 'Weighted Pull-Ups', '5–8'), 'reps')
+  const weighted = {
+    ...active,
+    exercises: active.exercises.map((item, index) => index === 0
+      ? { ...item, sets: item.sets.map((set, setIndex) => setIndex === 0 ? { ...set, weightKg: '12.5', reps: '6', completed: true } : set) }
+      : item),
+  }
+  const record = storage.createWorkoutRecord(weighted, 3000)
+  assert.equal(record.exercises[0].exerciseId, 'pull-ups')
+  assert.equal(record.exercises[0].sets[0].weightKg, 12.5)
+  assert.equal(record.exercises[0].sets[0].reps, 6)
+  assert.equal(analytics.getProgressionPlan([record], { exerciseId: 'pull-ups', name: 'Weighted Pull-Ups', targetSets: 3, targetReps: '5–8' }).metricType, 'reps')
+})
+
+test('Core & Legs has the exact order and targets grouped as core, legs, then athleticism', () => {
   const core = workouts.getWorkout('core')
   assert.equal(core.name, 'Core & Legs')
-  assert.deepEqual(core.exercises.map(({ id, name, targetSets, targetReps }) => [id, name, targetSets, targetReps]), [
+  assert.deepEqual(rows(core), [
+    ['hanging-knee-raises', 'Hanging Knee Raises', 3, '10–15'],
+    ['cable-crunches', 'Cable Crunches', 3, '12–15'],
+    ['pallof-press', 'Pallof Press', 2, '10 per side'],
+    ['plank', 'Plank', 2, '45–60 seconds'],
+    ['romanian-deadlift', 'Romanian Deadlift', 3, '8–10'],
+    ['leg-press', 'Leg Press', 3, '8–12'],
+    ['bulgarian-split-squats', 'Bulgarian Split Squats', 2, '8–10 per leg'],
+    ['farmer-carries', 'Farmer Carries', 3, '30–40 seconds'],
+    ['single-leg-balance', 'Single-Leg Balance', 2, '30 seconds per side'],
+  ])
+  assert.deepEqual([0, 4, 7].map((index) => core.exercises[index].name), [
+    'Hanging Knee Raises', 'Romanian Deadlift', 'Farmer Carries',
+  ])
+  assert.equal(analytics.getExerciseMetricType('farmer-carries', 'Farmer Carries', '30–40 seconds'), 'timed')
+  assert.equal(analytics.getExerciseMetricType('single-leg-balance', 'Single-Leg Balance', '30 seconds per side'), 'per-side-time')
+  assert.ok(!core.exercises.some((item) => ['standing-cable-leg-curls', 'standing-calf-raises', 'dead-bug'].includes(item.id)))
+})
+
+test('Muscle Balance maps the new movements and preserves the established weighting method', () => {
+  const expected = {
+    'barbell-bench-press': { chest: 1, triceps: 0.5, shoulders: 0.5 },
+    'incline-dumbbell-press': { chest: 1, shoulders: 0.5, triceps: 0.5 },
+    'pec-deck': { chest: 1 },
+    'machine-shoulder-press': { shoulders: 1, triceps: 0.5 },
+    'pull-ups': { back: 1, biceps: 0.5 },
+    'smith-machine-bent-over-row': { back: 1, biceps: 0.5, shoulders: 0.25 },
+    'chest-supported-rows': { back: 1, biceps: 0.5, shoulders: 0.25 },
+    'reverse-pec-deck': { shoulders: 1, back: 0.25 },
+    'preacher-curls': { biceps: 1 },
+    'hammer-curls': { biceps: 1 },
+    'romanian-deadlift': { hamstrings: 1, glutes: 1, back: 0.5 },
+    'leg-press': { quadriceps: 1, glutes: 0.5, hamstrings: 0.25 },
+  }
+  for (const [id, weights] of Object.entries(expected)) assert.deepEqual(muscleMap.getMuscleEntry(id).weights, weights, id)
+  assert.equal(substitutions.catalogueMatchesMuscleMap(), true)
+  assert.ok(Object.keys(expected).every((id) => workouts.workouts.some((workout) => workout.exercises.some((exercise) => exercise.id === id))))
+})
+
+test('saved active sessions and historical workout names, exercises and sets normalize unchanged', () => {
+  const oldExercises = [
     ['cable-crunches', 'Cable Crunches', 3, '10–15'],
     ['hanging-knee-raises', 'Hanging Knee Raises', 2, '8–12'],
     ['pallof-press', 'Pallof Press', 2, '10 per side'],
@@ -39,43 +123,13 @@ test('Core & Legs contains exactly the requested eight exercises and targets', (
     ['bulgarian-split-squats', 'Bulgarian Split Squats', 2, '8 per leg'],
     ['standing-cable-leg-curls', 'Standing Cable Leg Curls', 2, '10–15'],
     ['standing-calf-raises', 'Standing Calf Raises', 2, '12–15'],
-  ])
-  assert.ok(core.exercises.some((exercise) => exercise.id === 'farmer-carries'))
-  assert.ok(core.exercises.some((exercise) => exercise.id === 'hanging-knee-raises'))
-  assert.ok(!core.exercises.some((exercise) => exercise.id === 'dead-bug'))
-  assert.equal(analytics.getExerciseMetricType('farmer-carries', 'Farmer Carries', '30–40 metres'), 'distance')
-  assert.equal(substitutions.catalogueMatchesMuscleMap(), true)
-})
-
-test('new leg accessories retain progression and suitable equipment substitutions', () => {
-  const curl = { exerciseId: 'standing-cable-leg-curls', name: 'Standing Cable Leg Curls', targetSets: 2, targetReps: '10–15' }
-  const calf = { exerciseId: 'standing-calf-raises', name: 'Standing Calf Raises', targetSets: 2, targetReps: '12–15' }
-  assert.equal(analytics.getProgressionPlan([], curl).metricType, 'reps')
-  assert.equal(analytics.getProgressionPlan([], calf).metricType, 'reps')
-  assert.ok(substitutions.getSubstitutionCandidates(curl.exerciseId, 'equipment-unavailable', ['cable']).some((item) => item.id === 'band-leg-curls'))
-  assert.ok(substitutions.getSubstitutionCandidates(calf.exerciseId, 'equipment-unavailable', ['machine']).some((item) => item.id === 'single-leg-calf-raises'))
-})
-
-test('saved Core & Athleticism active session and history survive unchanged beside the new template', () => {
-  const oldExercises = [
-    ['hanging-knee-raises', 'Hanging Knee Raises', 3, '10–15'],
-    ['cable-crunches', 'Cable Crunches', 3, '12–15'],
-    ['pallof-press', 'Pallof Press', 3, '10 per side'],
-    ['bulgarian-split-squats', 'Bulgarian Split Squats', 3, '8 per leg'],
-    ['farmer-carries', 'Farmer Carries', 3, '30–40 seconds'],
-    ['single-leg-balance', 'Single-Leg Balance', 2, '30 seconds per side'],
-    ['plank', 'Plank', 2, '45–60 seconds'],
   ].map(([id, name, targetSets, targetReps]) => ({
-    id, name, focus: 'Previous routine', instructions: 'Preserved session instructions.',
-    targetSets: Number(targetSets), targetReps,
+    id, name, focus: 'Previous programme', instructions: 'Saved instructions.',
+    targetSets: Number(targetSets), targetReps, ...(id === 'leg-press' || id === 'bulgarian-split-squats' || id === 'standing-cable-leg-curls' || id === 'standing-calf-raises' ? { isLowerBody: true } : {}),
   }))
   const active = {
-    id: 'active-core-before-programme-change', workoutId: 'core', startedAt: 1_700_000_000_000,
-    template: {
-      id: 'core', name: 'Core & Athleticism', focus: 'Trunk · stability · balance',
-      description: 'Saved in-progress session snapshot.', duration: '30–40 min',
-      warmup: [], cooldown: [], exercises: oldExercises,
-    },
+    id: 'active-core-before-update', workoutId: 'core', startedAt: 1_700_000_000_000,
+    template: { id: 'core', name: 'Core & Legs', focus: 'Previous programme', description: 'Saved in-progress snapshot.', duration: '35–45 min', warmup: [], cooldown: [], exercises: oldExercises },
     exercises: oldExercises.map((exercise, index) => ({
       exerciseId: exercise.id, completed: index < 3,
       sets: Array.from({ length: exercise.targetSets }, (_, setIndex) => ({
@@ -86,22 +140,19 @@ test('saved Core & Athleticism active session and history survive unchanged besi
     warmupCompletedIds: [], cooldownCompletedIds: [],
   }
   const previousRecord = {
-    id: 'completed-core-history-before-change', workoutId: 'core', workoutName: 'Core & Athleticism',
+    id: 'historic-core-athleticism', workoutId: 'core', workoutName: 'Core & Athleticism',
     startedAt: 1_699_000_000_000, completedAt: 1_699_003_600_000, durationSeconds: 3600,
     exercises: [{ exerciseId: 'dead-bug', name: 'Dead Bug', instructions: 'Historical instructions.', targetSets: 2, targetReps: '8–12 per side', completed: true,
       sets: [{ id: 'historic-dead-bug-set', weightKg: null, reps: 10, completed: true }] }],
   }
-  const existing = {
-    ...storage.createInitialData(), rotationIndex: 2, currentWorkout: active, history: [previousRecord],
-  }
-
-  const normalized = storage.normalizeAppData(existing)
-  assert.ok(normalized)
-  assert.deepEqual(normalized.currentWorkout, active)
-  assert.equal(normalized.currentWorkout.template.name, 'Core & Athleticism')
-  assert.deepEqual(normalized.currentWorkout.exercises.slice(0, 3), active.exercises.slice(0, 3))
-  assert.deepEqual(normalized.history, [previousRecord])
-  assert.equal(storage.createWorkoutRecord(normalized.currentWorkout, 1_700_003_600_000).workoutName, 'Core & Athleticism')
-  assert.equal(workouts.getWorkout('core').name, 'Core & Legs')
-  assert.equal(workouts.workouts[(normalized.rotationIndex + 1) % workouts.workouts.length].name, 'Push')
+  const before = { ...storage.createInitialData(), rotationIndex: 2, currentWorkout: active, history: [previousRecord] }
+  const restored = storage.normalizeAppData(before)
+  assert.ok(restored)
+  assert.equal(storage.isAppData(restored), true)
+  assert.deepEqual(storage.normalizeAppData(restored), restored)
+  assert.deepEqual(restored.currentWorkout, active)
+  assert.deepEqual(restored.history, [previousRecord])
+  assert.equal(storage.createWorkoutRecord(restored.currentWorkout, 1_700_003_600_000).workoutName, 'Core & Legs')
+  assert.equal(restored.history[0].workoutName, 'Core & Athleticism')
+  assert.equal(workouts.workouts[(restored.rotationIndex + 1) % workouts.workouts.length].name, 'Push')
 })

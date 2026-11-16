@@ -1701,6 +1701,22 @@
   margin-top: 16px;
 }
 
+.programme-section-divider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 10px 0 1px;
+  color: var(--cyan);
+  font: 700 10px var(--font-mono);
+  letter-spacing: .12em;
+}
+
+.programme-section-divider i {
+  height: 1px;
+  flex: 1;
+  background: var(--line-soft);
+}
+
 .session-exercise {
   padding: 15px;
   border: 1px solid #263140;

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { Fragment, useState } from 'react'
 import { playSound } from './sound'
 import { SoundToggle } from './soundToggle'
 import { restPresets, type ActiveWorkout, type SetEntry, type WorkoutRecord } from './workoutStorage'
@@ -300,6 +300,13 @@ export function WorkoutSession({
         <div className="session-exercises">
         {workout.exercises.map((exercise, index) => {
           const state = activeWorkout.exercises[index]
+          const isCurrentCoreTemplate = activeWorkout.workoutId === 'core'
+            && workout.exercises[0]?.id === 'hanging-knee-raises'
+            && workout.exercises[4]?.id === 'romanian-deadlift'
+            && workout.exercises[7]?.id === 'farmer-carries'
+          const programmeSection = isCurrentCoreTemplate
+            ? ({ 0: 'CORE / ABS', 4: 'LEGS', 7: 'ATHLETICISM' } as Record<number, string>)[index]
+            : undefined
           const metricType = getExerciseMetricType(exercise.id, exercise.name, exercise.targetReps)
           const isSideSpecific = metricType === 'per-side' || metricType === 'per-side-time'
           const distanceUnit = /\bkm\b/i.test(exercise.targetReps) ? 'km' : 'metres'
@@ -307,9 +314,10 @@ export function WorkoutSession({
           const quantityLabel = metricType === 'timed' || metricType === 'per-side-time' ? 'seconds' : metricType === 'distance' ? `distance in ${distanceUnit}` : 'repetitions'
           const quantityHeading = metricType === 'timed' ? 'SEC' : metricType === 'per-side-time' ? 'SEC / SIDE' : metricType === 'distance' ? distanceHeading : metricType === 'per-side' ? 'REPS / SIDE' : 'REPS'
           return (
+            <Fragment key={exercise.id}>
+            {programmeSection && <div className="programme-section-divider"><span>{programmeSection}</span><i /></div>}
             <article
               className={`session-exercise ${state.completed ? 'exercise-complete' : ''} ${index === activeWorkout.exercises.findIndex((item) => !item.completed) ? 'exercise-current' : ''}`}
-              key={exercise.id}
             >
               <div className="session-exercise-heading">
                 <span className="exercise-number">{String(index + 1).padStart(2, '0')}</span>
@@ -449,6 +457,7 @@ export function WorkoutSession({
                 onRemovePreferred={onRemovePreferredSubstitution}
               />
             </article>
+            </Fragment>
           )
         })}
         </div>

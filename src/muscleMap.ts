@@ -65,6 +65,9 @@ export const exerciseMuscleMap: Record<string, ExerciseMuscleEntry> = {
   'incline-dumbbell-press': {
     weights: { chest: 1, shoulders: 0.5, triceps: 0.5 },
   },
+  'pec-deck': {
+    weights: { chest: 1 },
+  },
   'overhead-shoulder-press': {
     weights: { shoulders: 1, triceps: 0.5 },
   },
@@ -82,13 +85,13 @@ export const exerciseMuscleMap: Record<string, ExerciseMuscleEntry> = {
   },
 
   // ── Current rotation: Pull ──────────────────────────────────────────────
-  'romanian-deadlift': {
-    weights: { hamstrings: 1, glutes: 1, back: 0.5 },
-    notes: 'Back = spinal erectors holding the hinge.',
-  },
   'pull-ups': {
     weights: { back: 1, biceps: 0.5 },
-    notes: 'Back = mainly lats. Grip/forearms not on the radar.',
+    notes: 'Back = mainly lats. External load is optional; grip/forearms not on the radar.',
+  },
+  'smith-machine-bent-over-row': {
+    weights: { back: 1, biceps: 0.5, shoulders: 0.25 },
+    notes: 'Shoulders = rear delts; back = lats and upper-back retractors.',
   },
   'chest-supported-rows': {
     weights: { back: 1, biceps: 0.5, shoulders: 0.25 },
@@ -106,7 +109,7 @@ export const exerciseMuscleMap: Record<string, ExerciseMuscleEntry> = {
   },
   'hammer-curls': {
     weights: { biceps: 1 },
-    notes: 'Forearms are not on the radar.',
+    notes: 'Brachialis, brachioradialis and forearm contributions are not separate radar groups.',
   },
 
   // ── Current rotation: Core & Legs ───────────────────────────────────────
@@ -139,6 +142,10 @@ export const exerciseMuscleMap: Record<string, ExerciseMuscleEntry> = {
   'band-leg-curls': { weights: { hamstrings: 1 } },
   'standing-calf-raises': { weights: { calves: 1 } },
   'single-leg-calf-raises': { weights: { calves: 1 } },
+  'romanian-deadlift': {
+    weights: { hamstrings: 1, glutes: 1, back: 0.5 },
+    notes: 'Back = spinal erectors holding the hinge.',
+  },
   'machine-chest-press': { weights: { chest: 1, triceps: 0.5, shoulders: 0.5 } },
   'push-ups': { weights: { chest: 1, triceps: 0.5, shoulders: 0.5, core: 0.25 } },
   'incline-machine-press': { weights: { chest: 1, shoulders: 0.5, triceps: 0.5 } },

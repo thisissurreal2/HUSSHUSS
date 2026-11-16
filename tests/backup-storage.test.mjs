@@ -164,7 +164,12 @@ before(async () => {
       }
     }
     const record = workoutStorage.createWorkoutRecord(completed, 1_700_000_003_000)
-    const incomplete = workoutStorage.createActiveWorkout('push', 1_700_000_010_000, [record])
+    const incomplete = workoutStorage.createActiveWorkout('core', 1_700_000_010_000, [record])
+    incomplete.exercises[0] = {
+      ...incomplete.exercises[0],
+      sets: incomplete.exercises[0].sets.map((set, index) => index === 0 ? { ...set, reps: '12', completed: true } : set),
+    }
+    incomplete.exercises[0].completed = false
     const extraSession = extras.completeExtraSession(extras.createExtraSession(['wrist-curls', 'dead-hangs'], 1_700_000_020_000), 1_700_000_030_000)
     extraSession.exercises.forEach((exercise) => { exercise.units[0].completed = true })
     const completedExtra = extras.completeExtraSession(extraSession, 1_700_000_030_000)
@@ -174,6 +179,7 @@ before(async () => {
     expectedData = {
       workouts: {
         ...workoutStorage.createInitialData(),
+        rotationIndex: 2,
         history: [record],
         currentWorkout: incomplete,
         extrasSessions: [completedExtra],
@@ -270,8 +276,6 @@ test('isolated restore creates a safety snapshot and failed restore preserves al
       format: 'husshuss-backup', version: 2, exportedAt: new Date().toISOString(),
       data: structuredClone(expectedData),
     }
-    restoredBundle.data.workouts.rotationIndex = 1
-    restoredBundle.data.workouts.currentWorkout = null
     const parsed = await backup.parseBackup(JSON.stringify(restoredBundle), '')
     await backup.restoreBackup(parsed)
     for (const category of ['workouts', 'measurements', 'athletic']) {
@@ -285,6 +289,8 @@ test('isolated restore creates a safety snapshot and failed restore preserves al
     const restoredWorkouts = database.stores.get('records').get('workouts').snapshot
     assert.equal(restoredWorkouts.history.length, parsed.data.workouts.history.length)
     assert.equal(restoredWorkouts.extrasSessions.length, parsed.data.workouts.extrasSessions.length)
+    assert.equal(restoredWorkouts.currentWorkout.template.name, 'Core & Legs')
+    assert.deepEqual(restoredWorkouts.currentWorkout.exercises, parsed.data.workouts.currentWorkout.exercises)
 
     const beforeFailure = Object.fromEntries(['workouts', 'measurements', 'athletic'].map((category) => [category,
       structuredClone(database.stores.get('records').get(category).snapshot),
