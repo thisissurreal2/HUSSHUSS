@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "tsc -b && tsc -p tsconfig.functions.json && vite build",
     "lint": "oxlint",
-    "test": "node --test --test-concurrency=1 tests/app-error-boundary.test.mjs tests/backup-storage.test.mjs tests/github-connection.test.mjs tests/jin-gu.test.mjs tests/local-database.test.mjs tests/xp.test.mjs tests/muscle-balance.test.mjs tests/extras.test.mjs tests/rest-timer.test.mjs tests/readiness.test.mjs tests/progressive-overload.test.mjs tests/exercise-substitution.test.mjs tests/workout-programme.test.mjs",
+    "test": "node --test --test-concurrency=1 tests/app-error-boundary.test.mjs tests/backup-storage.test.mjs tests/github-connection.test.mjs tests/jin-gu.test.mjs tests/isotefle.test.mjs tests/local-database.test.mjs tests/xp.test.mjs tests/muscle-balance.test.mjs tests/extras.test.mjs tests/rest-timer.test.mjs tests/readiness.test.mjs tests/progressive-overload.test.mjs tests/exercise-substitution.test.mjs tests/workout-programme.test.mjs",
     "test:github": "node --test tests/github-connection.test.mjs",
     "preview": "vite preview"
   },

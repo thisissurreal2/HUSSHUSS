@@ -5,6 +5,7 @@ import { isReadinessCheckIn, type ReadinessCheckIn } from './readiness'
 import { isRecoverySession, type RecoverySession } from './readinessTraining'
 import { validateSubstitutionForExercise } from './exerciseSubstitutions'
 import { isActiveJinGuSession, isJinGuSession, type ActiveJinGuSession, type JinGuSession } from './jinGuData'
+import { isActiveIsoSession, isIsoScheduleEntry, isIsoSessionRecord, type ActiveIsoSession, type IsoScheduleEntry, type IsoSessionRecord } from './isotefleData'
 
 export const STORAGE_KEY = 'husshuss.data'
 export const DATA_VERSION = 2
@@ -90,6 +91,9 @@ export type AppData = {
   activeJinGuSession?: ActiveJinGuSession | null
   jinGuHorseStanceTargetSeconds?: number
   jinGuHorseStanceTargetChangedAt?: number | null
+  isoTeFleSessions?: IsoSessionRecord[]
+  activeIsoTeFleSession?: ActiveIsoSession | null
+  isoTeFleSchedule?: IsoScheduleEntry[]
 }
 
 export const restPresets = [30, 60, 90, 120, 180] as const
@@ -116,6 +120,9 @@ export function createInitialData(): AppData {
     activeJinGuSession: null,
     jinGuHorseStanceTargetSeconds: 20,
     jinGuHorseStanceTargetChangedAt: null,
+    isoTeFleSessions: [],
+    activeIsoTeFleSession: null,
+    isoTeFleSchedule: [],
     timerAutoStart: true,
     timerCountdownWarnings: true,
     timerVibration: false,
@@ -387,6 +394,9 @@ export function isAppData(value: unknown): value is AppData {
     || (value.activeJinGuSession !== undefined && !(value.activeJinGuSession === null || isActiveJinGuSession(value.activeJinGuSession)))
     || (value.jinGuHorseStanceTargetSeconds !== undefined && ![20, 25, 30, 35].includes(value.jinGuHorseStanceTargetSeconds as number))
     || (value.jinGuHorseStanceTargetChangedAt !== undefined && !(value.jinGuHorseStanceTargetChangedAt === null || isTimestamp(value.jinGuHorseStanceTargetChangedAt)))) return false
+  if ((value.isoTeFleSessions !== undefined && (!Array.isArray(value.isoTeFleSessions) || !value.isoTeFleSessions.every(isIsoSessionRecord)))
+    || (value.activeIsoTeFleSession !== undefined && !(value.activeIsoTeFleSession === null || isActiveIsoSession(value.activeIsoTeFleSession)))
+    || (value.isoTeFleSchedule !== undefined && (!Array.isArray(value.isoTeFleSchedule) || !value.isoTeFleSchedule.every(isIsoScheduleEntry)))) return false
   const ids = value.history.map((record) => (record as WorkoutRecord).id)
   const activeWorkout = value.currentWorkout as ActiveWorkout | null
   const extras = (value.extrasSessions as ExtraSessionRecord[] | undefined) ?? []
@@ -396,6 +406,9 @@ export function isAppData(value: unknown): value is AppData {
   const preferredSubstitutions = (value.preferredSubstitutions as Record<string, string> | undefined) ?? {}
   const jinGuSessions = (value.jinGuSessions as JinGuSession[] | undefined) ?? []
   const activeJinGuSession = (value.activeJinGuSession as ActiveJinGuSession | null | undefined) ?? null
+  const isoTeFleSessions = (value.isoTeFleSessions as IsoSessionRecord[] | undefined) ?? []
+  const activeIsoTeFleSession = (value.activeIsoTeFleSession as ActiveIsoSession | null | undefined) ?? null
+  const isoTeFleSchedule = (value.isoTeFleSchedule as IsoScheduleEntry[] | undefined) ?? []
   return new Set(ids).size === ids.length
     && new Set(extras.map((session) => session.id)).size === extras.length
     && new Set(favourites).size === favourites.length
@@ -405,6 +418,9 @@ export function isAppData(value: unknown): value is AppData {
     && isObject(preferredSubstitutions)
     && new Set(jinGuSessions.map((session) => session.id)).size === jinGuSessions.length
     && (!activeJinGuSession || !jinGuSessions.some((session) => session.id === activeJinGuSession.id))
+    && new Set(isoTeFleSessions.map((session) => session.id)).size === isoTeFleSessions.length
+    && (!activeIsoTeFleSession || !isoTeFleSessions.some((session) => session.id === activeIsoTeFleSession.id))
+    && new Set(isoTeFleSchedule.map((entry) => entry.id)).size === isoTeFleSchedule.length
     && (!activeWorkout || activeWorkout.workoutId === workouts[value.rotationIndex as number].id)
     && (!activeWorkout || !ids.includes(activeWorkout.id))
     && ((value.timerRunning as boolean) === (value.timerDeadline !== null))
@@ -485,17 +501,20 @@ function migrateLegacyData(legacy: LegacyAppData): AppData {
     activeJinGuSession: legacy.activeJinGuSession ?? null,
     jinGuHorseStanceTargetSeconds: legacy.jinGuHorseStanceTargetSeconds ?? 20,
     jinGuHorseStanceTargetChangedAt: legacy.jinGuHorseStanceTargetChangedAt ?? null,
+    isoTeFleSessions: legacy.isoTeFleSessions ?? [],
+    activeIsoTeFleSession: legacy.activeIsoTeFleSession ?? null,
+    isoTeFleSchedule: legacy.isoTeFleSchedule ?? [],
   }
 }
 
 export function normalizeAppData(value: unknown): AppData | null {
-  if (isAppData(value)) return { ...value, extrasSessions: value.extrasSessions ?? [], extrasFavourites: value.extrasFavourites ?? [], timerAutoStart: value.timerAutoStart ?? true, timerCountdownWarnings: value.timerCountdownWarnings ?? true, timerVibration: value.timerVibration ?? false, readiness: value.readiness ?? [], recoverySessions: value.recoverySessions ?? [], preferredSubstitutions: value.preferredSubstitutions ?? {}, jinGuSessions: value.jinGuSessions ?? [], activeJinGuSession: value.activeJinGuSession ?? null, jinGuHorseStanceTargetSeconds: value.jinGuHorseStanceTargetSeconds ?? 20, jinGuHorseStanceTargetChangedAt: value.jinGuHorseStanceTargetChangedAt ?? null }
+  if (isAppData(value)) return { ...value, extrasSessions: value.extrasSessions ?? [], extrasFavourites: value.extrasFavourites ?? [], timerAutoStart: value.timerAutoStart ?? true, timerCountdownWarnings: value.timerCountdownWarnings ?? true, timerVibration: value.timerVibration ?? false, readiness: value.readiness ?? [], recoverySessions: value.recoverySessions ?? [], preferredSubstitutions: value.preferredSubstitutions ?? {}, jinGuSessions: value.jinGuSessions ?? [], activeJinGuSession: value.activeJinGuSession ?? null, jinGuHorseStanceTargetSeconds: value.jinGuHorseStanceTargetSeconds ?? 20, jinGuHorseStanceTargetChangedAt: value.jinGuHorseStanceTargetChangedAt ?? null, isoTeFleSessions: value.isoTeFleSessions ?? [], activeIsoTeFleSession: value.activeIsoTeFleSession ?? null, isoTeFleSchedule: value.isoTeFleSchedule ?? [] }
   return isLegacyAppData(value) ? migrateLegacyData(value) : null
 }
 
 export async function readAppData(): Promise<{ data: AppData; error: string | null; usable: boolean }> {
   const result = await readPrimarySnapshot('workouts', STORAGE_KEY, isAppData, normalizeAppData, createInitialData())
-  return { ...result, data: { ...result.data, extrasSessions: result.data.extrasSessions ?? [], extrasFavourites: result.data.extrasFavourites ?? [], timerAutoStart: result.data.timerAutoStart ?? true, timerCountdownWarnings: result.data.timerCountdownWarnings ?? true, timerVibration: result.data.timerVibration ?? false, readiness: result.data.readiness ?? [], recoverySessions: result.data.recoverySessions ?? [], preferredSubstitutions: result.data.preferredSubstitutions ?? {}, jinGuSessions: result.data.jinGuSessions ?? [], activeJinGuSession: result.data.activeJinGuSession ?? null, jinGuHorseStanceTargetSeconds: result.data.jinGuHorseStanceTargetSeconds ?? 20, jinGuHorseStanceTargetChangedAt: result.data.jinGuHorseStanceTargetChangedAt ?? null } }
+  return { ...result, data: { ...result.data, extrasSessions: result.data.extrasSessions ?? [], extrasFavourites: result.data.extrasFavourites ?? [], timerAutoStart: result.data.timerAutoStart ?? true, timerCountdownWarnings: result.data.timerCountdownWarnings ?? true, timerVibration: result.data.timerVibration ?? false, readiness: result.data.readiness ?? [], recoverySessions: result.data.recoverySessions ?? [], preferredSubstitutions: result.data.preferredSubstitutions ?? {}, jinGuSessions: result.data.jinGuSessions ?? [], activeJinGuSession: result.data.activeJinGuSession ?? null, jinGuHorseStanceTargetSeconds: result.data.jinGuHorseStanceTargetSeconds ?? 20, jinGuHorseStanceTargetChangedAt: result.data.jinGuHorseStanceTargetChangedAt ?? null, isoTeFleSessions: result.data.isoTeFleSessions ?? [], activeIsoTeFleSession: result.data.activeIsoTeFleSession ?? null, isoTeFleSchedule: result.data.isoTeFleSchedule ?? [] } }
 }
 
 export function writeAppData(data: AppData): Promise<void> {

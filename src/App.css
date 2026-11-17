@@ -7184,6 +7184,161 @@ textarea:focus-visible {
   }
 }
 
+/* IsoTeFle uses the same flat Training Field surfaces as Pull and Core & Legs. */
+.isotefle-page { display: grid; gap: 22px; width: min(100%, 1120px); margin-inline: auto; min-width: 0; }
+.isotefle-heading { display: grid; gap: 16px; padding-bottom: 16px; border-bottom: 1px solid var(--line); }
+.isotefle-heading h1 { margin: 7px 0; font-size: clamp(38px, 7vw, 64px); line-height: .96; letter-spacing: -.045em; }
+.isotefle-heading .page-subtitle { max-width: 700px; }
+.isotefle-view-tabs { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 3px; scrollbar-width: thin; }
+.isotefle-view-tabs button { flex: 0 0 auto; min-height: 44px; padding: 10px 13px; border: 1px solid var(--line); background: transparent; color: var(--muted); font: 600 11px/1.2 var(--font-mono); }
+.isotefle-view-tabs button.selected { border-color: rgba(54,229,255,.55); background: rgba(54,229,255,.08); color: var(--cyan); }
+.isotefle-error { padding: 11px 13px; border-left: 3px solid var(--orange); background: var(--panel); color: var(--text); font-size: 12px; }
+.isotefle-today { display: grid; gap: 12px; border-left: 3px solid var(--cyan); }
+.isotefle-today-kicker { display: flex; justify-content: space-between; gap: 12px; align-items: start; }
+.isotefle-today-state { color: var(--lime); font: 700 11px/1.3 var(--font-mono); }
+.isotefle-today h2 { max-width: 720px; margin: 0; font: 700 clamp(25px,5vw,38px)/1.03 var(--font-display); }
+.isotefle-today > p { max-width: 720px; margin: 0; color: var(--muted); font-size: 13px; line-height: 1.55; }
+.isotefle-today-actions { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+.isotefle-today-actions > button, .isotefle-today-actions > .button-primary { min-height: 44px; }
+.isotefle-inline-date { display: flex; flex-wrap: wrap; gap: 7px; align-items: center; color: var(--muted); font: 600 11px var(--font-mono); }
+.isotefle-inline-date input, .isotefle-tendon-check select, .isotefle-variation select { min-height: 42px; max-width: 180px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 2px; background: #101216; color: var(--text); font: 12px var(--font-mono); }
+.isotefle-programme-grid { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 0 18px; border-block: 1px solid var(--line); }
+.isotefle-programme-row { display: grid; align-content: start; gap: 9px; min-width: 0; padding: 16px 0; border: 0; border-right: 1px solid var(--line); background: transparent; color: var(--text); text-align: left; cursor: pointer; }
+.isotefle-programme-row:last-child { border-right: 0; }
+.isotefle-programme-row strong { font: 700 20px/1.1 var(--font-display); }
+.isotefle-programme-row > span:not(.eyebrow) { color: var(--muted); font-size: 12px; line-height: 1.5; }
+.isotefle-programme-row small { color: var(--cyan); font: 500 11px/1.5 var(--font-mono); }
+.isotefle-schedule { display: grid; gap: 10px; }
+.isotefle-section-title h2 { margin: 4px 0 0; font: 700 23px/1.1 var(--font-display); }
+.isotefle-schedule-note, .isotefle-progress-summary > p { max-width: 760px; margin: 0; color: var(--muted); font-size: 11px; line-height: 1.55; }
+.isotefle-schedule-list { border-top: 1px solid var(--line); }
+.isotefle-schedule-row { display: grid; grid-template-columns: minmax(85px,.4fr) minmax(180px,1fr) auto minmax(170px,.8fr); gap: 12px; align-items: center; min-height: 58px; padding: 9px 0; border-bottom: 1px solid rgba(233,232,225,.1); }
+.isotefle-schedule-row time, .isotefle-schedule-row small { color: var(--muted); font: 600 11px var(--font-mono); font-variant-numeric: tabular-nums; }
+.isotefle-schedule-row > div:nth-child(2) { display: grid; gap: 3px; min-width: 0; }
+.isotefle-schedule-row > div:nth-child(2) strong { font: 600 15px var(--font-display); }
+.isotefle-schedule-row > div:nth-child(2) span { color: var(--muted); font-size: 11px; }
+.isotefle-schedule-actions { display: flex; justify-content: flex-end; gap: 8px; align-items: center; }
+.isotefle-schedule-actions button { min-height: 40px; border: 1px solid var(--line); background: transparent; color: var(--muted); font: 600 11px var(--font-mono); }
+.isotefle-schedule-actions input { min-height: 40px; max-width: 150px; background: #101216; border: 1px solid var(--line); color: var(--text); font-size: 11px; }
+.isotefle-recovery-note { display: grid; gap: 7px; padding: 14px 0; border-top: 1px solid var(--line); }
+.isotefle-recovery-note strong { font: 600 16px var(--font-display); }
+.isotefle-recovery-note p { max-width: 650px; margin: 0; color: var(--muted); font-size: 12px; line-height: 1.5; }
+.isotefle-recovery-note .button-text { justify-self: start; min-height: 44px; }
+.isotefle-programme-page { display: grid; gap: 18px; }
+.isotefle-programme-page > header { display: grid; gap: 7px; }
+.isotefle-programme-page > header h2 { margin: 0; font: 700 clamp(28px,5vw,42px)/1 var(--font-display); }
+.isotefle-programme-page > header p { max-width: 700px; margin: 0; color: var(--muted); font-size: 13px; line-height: 1.5; }
+.isotefle-template { border-top: 1px solid var(--line); }
+.isotefle-template-heading { display: flex; justify-content: space-between; gap: 16px; align-items: center; padding: 15px 0; }
+.isotefle-template-heading h3 { margin: 4px 0; font: 700 21px var(--font-display); }
+.isotefle-template-heading p { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.5; }
+.isotefle-template-heading .button-primary { min-height: 44px; flex: 0 0 auto; }
+.isotefle-exercise-list { border-top: 1px solid rgba(233,232,225,.1); }
+.isotefle-exercise-description { border-bottom: 1px solid rgba(233,232,225,.1); }
+.isotefle-exercise-description summary { display: grid; grid-template-columns: 28px minmax(0,1fr) minmax(100px,.45fr); gap: 10px; align-items: center; min-height: 60px; padding: 8px 0; cursor: pointer; list-style: none; }
+.isotefle-exercise-description summary::-webkit-details-marker { display: none; }
+.isotefle-exercise-description summary > span { color: var(--muted); font: 500 11px var(--font-mono); font-variant-numeric: tabular-nums; }
+.isotefle-exercise-description summary > div { display: grid; gap: 3px; }
+.isotefle-exercise-description summary small { color: var(--muted); font: 600 11px/1.35 var(--font-mono); }
+.isotefle-exercise-description summary strong { color: var(--text); font: 600 15px/1.25 var(--font-display); }
+.isotefle-exercise-description summary em { color: var(--muted); font: 11px var(--font-mono); text-align: right; }
+.isotefle-instruction-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 8px 18px; padding: 0 0 15px 38px; }
+.isotefle-instruction-grid p { display: grid; gap: 3px; margin: 0; color: var(--muted); font-size: 12px; line-height: 1.5; }
+.isotefle-instruction-grid b, .isotefle-runner-instructions b { color: var(--cyan); font: 700 11px var(--font-mono); }
+.isotefle-progress-summary { display: grid; gap: 12px; padding: 14px 0; border-top: 1px solid var(--line); }
+.isotefle-progress-values { display: flex; flex-wrap: wrap; gap: 24px; }
+.isotefle-progress-values > div { display: grid; gap: 3px; }
+.isotefle-progress-values strong { color: var(--text); font: 700 25px/1 var(--font-display); font-variant-numeric: tabular-nums; }
+.isotefle-progress-values span { color: var(--muted); font: 11px var(--font-mono); }
+.isotefle-last-performance { color: var(--muted); font: 600 11px/1.5 var(--font-mono); }
+.isotefle-tendon-check { display: grid; gap: 12px; max-width: 760px; padding: 18px 0; border-block: 1px solid var(--line); }
+.isotefle-tendon-check h2 { margin: 0; font: 700 27px/1.05 var(--font-display); }
+.isotefle-tendon-check > p { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.55; }
+.isotefle-tendon-check > label { display: grid; grid-template-columns: minmax(150px,1fr) minmax(150px,220px); gap: 12px; align-items: center; color: var(--text); font: 600 12px var(--font-display); }
+.isotefle-adjustment-advice { display: grid; gap: 5px; padding: 12px 0; border-block: 1px solid var(--line); }
+.isotefle-adjustment-advice b { color: var(--lime); font: 700 12px var(--font-mono); }
+.isotefle-adjustment-advice span { color: var(--muted); font-size: 12px; line-height: 1.5; }
+.isotefle-session { display: grid; gap: 15px; }
+.isotefle-session-header { display: flex; justify-content: space-between; gap: 16px; align-items: start; padding-bottom: 12px; border-bottom: 1px solid var(--line); }
+.isotefle-session-header h2 { margin: 5px 0; font: 700 26px/1 var(--font-display); }
+.isotefle-session-header p { margin: 0; color: var(--muted); font-size: 12px; }
+.isotefle-session-header-actions { display: flex; gap: 7px; }
+.isotefle-session-header-actions button { min-height: 44px; padding: 9px 12px; border: 1px solid var(--line); background: transparent; color: var(--text); font: 600 11px var(--font-mono); }
+.isotefle-session-progress { display: grid; gap: 6px; }
+.isotefle-session-progress > div:first-child { display: flex; justify-content: space-between; color: var(--muted); font: 600 11px var(--font-mono); font-variant-numeric: tabular-nums; }
+.isotefle-session-progress > div:last-child { height: 4px; background: var(--graphite); }
+.isotefle-session-progress i { display: block; height: 100%; background: var(--cyan); transition: width .18s ease; }
+.isotefle-exercise-navigation { display: flex; gap: 7px; overflow-x: auto; padding: 2px 0; }
+.isotefle-exercise-navigation button { flex: 0 0 44px; min-height: 44px; border: 1px solid var(--line); background: transparent; color: var(--muted); font: 600 11px var(--font-mono); font-variant-numeric: tabular-nums; }
+.isotefle-exercise-navigation button.current { border-color: var(--cyan); background: rgba(54,229,255,.08); color: var(--cyan); }
+.isotefle-exercise-navigation button.done { color: var(--lime); }
+.isotefle-session .session-exercise { margin: 0; }
+.isotefle-session .exercise-target { width: fit-content; max-width: 100%; }
+.isotefle-previous { margin: 8px 0; padding: 8px 10px; border-left: 1px solid var(--line); color: var(--muted); font: 11px/1.45 var(--font-mono); }
+.isotefle-runner-instructions summary { min-height: 44px; display: flex; align-items: center; color: var(--cyan); font: 600 11px var(--font-mono); cursor: pointer; }
+.isotefle-runner-instructions > div { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 6px 16px; padding-bottom: 10px; }
+.isotefle-runner-instructions p { margin: 0; color: var(--muted); font-size: 11px; line-height: 1.45; }
+.isotefle-runner-instructions b { display: block; margin-bottom: 2px; }
+.isotefle-variation { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; color: var(--muted); font: 600 11px var(--font-mono); }
+.isotefle-hold-timer, .isotefle-rest { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; padding: 12px 0; border-block: 1px solid var(--line); }
+.isotefle-hold-timer > div, .isotefle-rest > div { display: grid; gap: 5px; }
+.isotefle-hold-timer strong, .isotefle-rest strong { color: var(--cyan); font: 700 25px/1 var(--font-mono); font-variant-numeric: tabular-nums; }
+.isotefle-hold-timer button, .isotefle-rest button { min-height: 44px; padding: 9px 13px; border: 1px solid var(--line); background: transparent; color: var(--text); font: 600 11px var(--font-mono); }
+.isotefle-side-select { display: flex; gap: 5px; }
+.isotefle-side-select button.selected { border-color: var(--cyan); color: var(--cyan); background: rgba(54,229,255,.08); }
+.isotefle-variation small { flex-basis: 100%; color: var(--muted); font: 11px/1.4 var(--font-mono); }
+.isotefle-session .set-row.field-set-row { grid-template-columns: 24px minmax(70px,.9fr) minmax(50px,.7fr) minmax(52px,.8fr) 44px 28px; gap: 4px; }
+.isotefle-session .set-row.field-set-row.set-row-sides { grid-template-columns: 22px minmax(58px,.8fr) minmax(38px,.55fr) minmax(42px,.6fr) minmax(42px,.6fr) 44px 24px; gap: 3px; }
+.isotefle-session .set-input { min-width: 0; width: 100%; }
+.isotefle-session .set-remove-placeholder { min-width: 0; }
+.isotefle-set-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.isotefle-set-actions button, .isotefle-next-exercise button { min-height: 44px; padding: 9px 12px; border: 1px solid var(--line); background: transparent; color: var(--text); font: 600 11px var(--font-mono); }
+.isotefle-set-actions button:nth-child(2) { border-color: rgba(54,229,255,.45); color: var(--cyan); }
+.isotefle-next-exercise { display: grid; gap: 7px; padding: 12px 0; border-top: 1px solid var(--line); color: var(--muted); font: 600 11px/1.4 var(--font-mono); }
+.isotefle-next-exercise > div { display: flex; gap: 8px; }
+.isotefle-in-session-check { display: grid; gap: 8px; padding: 13px 0; border-top: 1px solid var(--line); }
+.isotefle-in-session-check > span { color: var(--lime); font: 700 11px var(--font-mono); }
+.isotefle-in-session-check label { display: grid; grid-template-columns: 120px minmax(0,1fr); gap: 10px; align-items: center; color: var(--muted); font: 600 11px var(--font-mono); }
+.isotefle-in-session-check input, .isotefle-in-session-check textarea { min-height: 42px; width: 100%; padding: 9px 10px; border: 1px solid var(--line); background: #101216; color: var(--text); font: 12px var(--font-sans); }
+.isotefle-in-session-check textarea { min-height: 68px; resize: vertical; }
+.isotefle-session-footer { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 12px; padding-top: 12px; border-top: 1px solid var(--line); }
+.isotefle-session-footer p { max-width: 620px; margin: 0; color: var(--muted); font-size: 11px; line-height: 1.5; }
+.isotefle-session-footer button { min-height: 48px; }
+.isotefle-history { display: grid; gap: 16px; }
+.isotefle-history > h2 { margin: -8px 0 0; font: 700 28px var(--font-display); }
+.isotefle-history-row { padding: 13px 0; border-top: 1px solid var(--line); }
+.isotefle-history-row h3 { margin: 5px 0; font: 600 17px var(--font-display); }
+.isotefle-history-row p { margin: 5px 0; color: var(--muted); font-size: 11px; line-height: 1.5; }
+.isotefle-history-row details summary, .isotefle-archived-history summary { min-height: 44px; display: flex; align-items: center; color: var(--cyan); font: 600 11px var(--font-mono); cursor: pointer; }
+.isotefle-archived-history { border-top: 1px solid var(--line); padding-top: 10px; }
+.isotefle-archived-history article { padding: 9px 0; border-top: 1px solid rgba(233,232,225,.1); }
+.isotefle-archived-history p { color: var(--muted); font-size: 11px; }
+@media (max-width: 700px) {
+  .isotefle-page { gap: 16px; }
+  .isotefle-programme-grid { grid-template-columns: minmax(0,1fr); gap: 0; }
+  .isotefle-programme-row { border-right: 0; border-bottom: 1px solid var(--line); padding: 13px 0; }
+  .isotefle-programme-row:last-child { border-bottom: 0; }
+  .isotefle-schedule-row { grid-template-columns: minmax(78px,.4fr) minmax(0,1fr) auto; gap: 7px; }
+  .isotefle-schedule-actions { grid-column: 2 / -1; justify-content: flex-start; }
+  .isotefle-template-heading { align-items: flex-start; flex-direction: column; }
+  .isotefle-exercise-description summary { grid-template-columns: 24px minmax(0,1fr); }
+  .isotefle-exercise-description summary em { grid-column: 2; text-align: left; }
+  .isotefle-instruction-grid, .isotefle-runner-instructions > div { grid-template-columns: minmax(0,1fr); padding-left: 32px; }
+  .isotefle-today-kicker { flex-direction: column; }
+  .isotefle-session-header { flex-direction: column; }
+  .isotefle-session-header-actions { width: 100%; }
+  .isotefle-session-header-actions button { flex: 1; }
+  .isotefle-tendon-check > label { grid-template-columns: minmax(0,1fr) minmax(120px,170px); }
+  .isotefle-session .set-row.field-set-row { grid-template-columns: 20px minmax(49px,.85fr) minmax(38px,.65fr) minmax(40px,.7fr) 44px 23px; gap: 2px; }
+  .isotefle-session .set-row.field-set-row.set-row-sides { grid-template-columns: 20px minmax(45px,.8fr) minmax(32px,.55fr) minmax(30px,.52fr) minmax(30px,.52fr) 44px 23px; gap: 2px; }
+  .isotefle-session .set-row.field-set-row.set-labels { font-size: 11px; }
+  .isotefle-session .set-input { padding: 5px 2px; font-size: 11px; }
+}
+@media (max-width: 360px) {
+  .isotefle-session .set-row.field-set-row { grid-template-columns: 18px minmax(42px,.8fr) minmax(33px,.6fr) minmax(34px,.65fr) 44px 23px; }
+  .isotefle-session .set-row.field-set-row.set-row-sides { grid-template-columns: 18px minmax(40px,.75fr) minmax(28px,.5fr) minmax(27px,.48fr) minmax(27px,.48fr) 44px 23px; }
+}
+
 /* Phase 5 · Stage 2 progress and development presentation */
 .progress-tab-content,
 .performance-dashboard,

@@ -33,8 +33,7 @@ import {
 } from './workoutStorage'
 import { getLowerBodyExercises, workouts, type Workout, type WorkoutId } from './workouts'
 import { ExtrasPage } from './ExtrasPage'
-import { JinGuPage } from './JinGu'
-import { createActiveJinGuSession, type ActiveJinGuSession, type JinGuSession } from './jinGuData'
+import { IsoTeFlePage } from './IsoTeFle'
 import { ReadinessPage } from './ReadinessView'
 import { getLocalDateKey, upsertReadinessCheckIn, type ReadinessCheckIn } from './readiness'
 import { ReadinessDecisionPanel } from './ReadinessActions'
@@ -65,13 +64,13 @@ type IconName =
 const navigation: { id: Tab; label: string; icon: IconName }[] = [
   { id: 'overview', label: 'Today', icon: 'grid' },
   { id: 'rotation', label: 'Train', icon: 'activity' },
-  { id: 'jin-gu', label: 'Jin Gu', icon: 'target' },
+  { id: 'isotefle', label: 'IsoTeFle', icon: 'target' },
   { id: 'history', label: 'History', icon: 'clock' },
   { id: 'progress', label: 'Progress', icon: 'trend' },
   { id: 'body', label: 'Measurements', icon: 'body' },
 ]
 
-type Tab = 'overview' | 'rotation' | 'jin-gu' | 'history' | 'progress' | 'body' | 'extras'
+type Tab = 'overview' | 'rotation' | 'isotefle' | 'history' | 'progress' | 'body' | 'extras'
 type ProgressView = 'dashboard' | 'strength' | 'muscle' | 'athletic' | 'insights' | 'backup' | 'readiness'
 
 function Icon({
@@ -291,42 +290,6 @@ function App() {
       ...current,
       recoverySessions: [session, ...(current.recoverySessions ?? [])],
     }))
-  }
-
-  function startJinGu(lightPractice: boolean) {
-    const current = dataRef.current
-    if (current.activeJinGuSession) return Promise.resolve(true)
-    const session = createActiveJinGuSession(
-      lightPractice,
-      current.jinGuHorseStanceTargetSeconds ?? 20,
-      getLocalDateKey(),
-    )
-    return updateData((latest) => latest.activeJinGuSession
-      ? latest
-      : { ...latest, activeJinGuSession: session })
-  }
-
-  function updateJinGuSession(session: ActiveJinGuSession) {
-    return updateData((current) => current.activeJinGuSession?.id === session.id
-      ? { ...current, activeJinGuSession: session }
-      : current)
-  }
-
-  function finishJinGuSession(session: JinGuSession) {
-    return updateData((current) => {
-      if (current.jinGuSessions?.some((item) => item.id === session.id)) {
-        return current.activeJinGuSession?.id === session.id ? { ...current, activeJinGuSession: null } : current
-      }
-      if (current.activeJinGuSession?.id !== session.id) return current
-      return { ...current, activeJinGuSession: null, jinGuSessions: [session, ...(current.jinGuSessions ?? [])] }
-    })
-  }
-
-  function setJinGuHorseStanceTarget(seconds: number) {
-    return updateData((current) => {
-      if (![20, 25, 30, 35].includes(seconds) || seconds !== (current.jinGuHorseStanceTargetSeconds ?? 20) + 5) return current
-      return { ...current, jinGuHorseStanceTargetSeconds: seconds, jinGuHorseStanceTargetChangedAt: Date.now() }
-    })
   }
 
   function updateCurrentWorkout(
@@ -966,19 +929,7 @@ function App() {
             />
           )}
 
-          {activeTab === 'jin-gu' && (
-            <JinGuPage
-              history={data.jinGuSessions ?? []}
-              activeSession={data.activeJinGuSession ?? null}
-              horseStanceTargetSeconds={data.jinGuHorseStanceTargetSeconds ?? 20}
-              horseStanceTargetChangedAt={data.jinGuHorseStanceTargetChangedAt ?? null}
-              readinessCategory={getTrainingRecommendation((data.readiness ?? []).find((entry) => entry.date === getLocalDateKey())).category === 'missing' ? undefined : getTrainingRecommendation((data.readiness ?? []).find((entry) => entry.date === getLocalDateKey())).category}
-              onStart={startJinGu}
-              onUpdate={updateJinGuSession}
-              onFinish={finishJinGuSession}
-              onSetHorseStanceTarget={setJinGuHorseStanceTarget}
-            />
-          )}
+          {activeTab === 'isotefle' && <IsoTeFlePage data={data} onChange={updateData} />}
 
           {activeTab === 'extras' && (
             <ExtrasPage

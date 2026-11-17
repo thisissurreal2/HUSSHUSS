@@ -118,6 +118,8 @@ let athleticStorage
 let readiness
 let readinessTraining
 let extras
+let isotefle
+let jinGu
 let database
 let localValues
 let expectedData
@@ -152,6 +154,8 @@ before(async () => {
   readiness = await vite.ssrLoadModule('/src/readiness.ts')
   readinessTraining = await vite.ssrLoadModule('/src/readinessTraining.ts')
   extras = await vite.ssrLoadModule('/src/extras.ts')
+  isotefle = await vite.ssrLoadModule('/src/isotefleData.ts')
+  jinGu = await vite.ssrLoadModule('/src/jinGuData.ts')
 
   const previousWindow = globalThis.window
   try {
@@ -208,6 +212,20 @@ before(async () => {
           updatedAt: 1_700_000_060_000, values: { seconds: 68 }, notes: 'synthetic record',
         }],
       },
+    }
+    const isoEntry = { id: 'isometric-a:2026-11-16', templateId: 'isometric-a', programmeId: 'isometric', originalDate: '2026-11-16', scheduledDate: '2026-11-16', status: 'scheduled', optional: false, updatedAt: 1_700_000_000_000 }
+    const isoActive = isotefle.createIsoActiveSession(isoEntry, 1_700_000_100_000)
+    isoActive.exercises[0].sets[0] = { ...isoActive.exercises[0].sets[0], durationSeconds: 34, completed: true }
+    const isoRecord = isotefle.createIsoSessionRecord(isoActive, 1_700_000_160_000)
+    const oldActive = jinGu.createActiveJinGuSession(true, 20, '2026-11-15', 1_700_000_020_000)
+    const oldRecord = jinGu.createJinGuSessionRecord(jinGu.setJinGuExerciseStatus(oldActive, 'gentle-shaking', 'completed'), 1_700_000_060_000, { difficulty: 2, discomfortReported: false, notes: 'archived synthetic record' })
+    expectedData.workouts = {
+      ...expectedData.workouts,
+      isoTeFleSessions: [isoRecord],
+      activeIsoTeFleSession: isotefle.createIsoActiveSession({ ...isoEntry, id: 'isometric-b:2026-11-19', templateId: 'isometric-b', scheduledDate: '2026-11-19', originalDate: '2026-11-19' }, 1_700_000_200_000),
+      isoTeFleSchedule: [isoEntry],
+      jinGuSessions: [oldRecord],
+      activeJinGuSession: jinGu.createActiveJinGuSession(true, 20, '2026-11-16', 1_700_000_200_000),
     }
     assert.equal(workoutStorage.isAppData(expectedData.workouts), true)
     assert.equal(measurementStorage.isMeasurementData(expectedData.measurements), true)
