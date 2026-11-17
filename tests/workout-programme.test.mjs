@@ -44,17 +44,16 @@ test('Push has the exact chest, shoulder and triceps list with no leg press or b
   ])
 })
 
-test('Pull prioritizes weighted pull-ups and has the exact six requested exercises', () => {
+test('Pull prioritizes weighted pull-ups and removes the Smith row without changing the remaining order', () => {
   const pull = workouts.getWorkout('pull')
   assert.deepEqual(rows(pull), [
     ['pull-ups', 'Weighted Pull-Ups', 3, '5–8'],
-    ['smith-machine-bent-over-row', 'Smith Machine Bent-Over Row', 3, '6–8'],
     ['chest-supported-rows', 'Chest-Supported Row', 3, '8–12'],
     ['reverse-pec-deck', 'Reverse Pec Deck', 2, '12–15'],
     ['preacher-curls', 'Preacher Curls', 3, '8–12'],
     ['hammer-curls', 'Hammer Curls', 2, '10–12'],
   ])
-  assert.ok(!pull.exercises.some((item) => ['single-arm-cable-rows', 'romanian-deadlift', 'incline-dumbbell-curls'].includes(item.id)))
+  assert.ok(!pull.exercises.some((item) => ['smith-machine-bent-over-row', 'single-arm-cable-rows', 'romanian-deadlift', 'incline-dumbbell-curls'].includes(item.id)))
 
   const active = storage.createActiveWorkout('pull', 2000)
   assert.equal(analytics.getExerciseMetricType('pull-ups', 'Weighted Pull-Ups', '5–8'), 'reps')
@@ -110,7 +109,8 @@ test('Muscle Balance maps the new movements and preserves the established weight
   }
   for (const [id, weights] of Object.entries(expected)) assert.deepEqual(muscleMap.getMuscleEntry(id).weights, weights, id)
   assert.equal(substitutions.catalogueMatchesMuscleMap(), true)
-  assert.ok(Object.keys(expected).every((id) => workouts.workouts.some((workout) => workout.exercises.some((exercise) => exercise.id === id))))
+  assert.deepEqual(muscleMap.getMuscleEntry('smith-machine-bent-over-row').weights, expected['smith-machine-bent-over-row'])
+  assert.ok(Object.keys(expected).filter((id) => id !== 'smith-machine-bent-over-row').every((id) => workouts.workouts.some((workout) => workout.exercises.some((exercise) => exercise.id === id))))
 })
 
 test('saved active sessions and historical workout names, exercises and sets normalize unchanged', () => {
@@ -145,14 +145,22 @@ test('saved active sessions and historical workout names, exercises and sets nor
     exercises: [{ exerciseId: 'dead-bug', name: 'Dead Bug', instructions: 'Historical instructions.', targetSets: 2, targetReps: '8–12 per side', completed: true,
       sets: [{ id: 'historic-dead-bug-set', weightKg: null, reps: 10, completed: true }] }],
   }
-  const before = { ...storage.createInitialData(), rotationIndex: 2, currentWorkout: active, history: [previousRecord] }
+  const previousPullRecord = {
+    id: 'historic-pull-with-smith-row', workoutId: 'pull', workoutName: 'Pull',
+    startedAt: 1_698_000_000_000, completedAt: 1_698_003_600_000, durationSeconds: 3600,
+    exercises: [{ exerciseId: 'smith-machine-bent-over-row', name: 'Smith Machine Bent-Over Row', instructions: 'Historical row instructions.', targetSets: 3, targetReps: '6–8', completed: true,
+      sets: [{ id: 'historic-smith-row-set', weightKg: 50, reps: 8, completed: true }] }],
+  }
+  const before = { ...storage.createInitialData(), rotationIndex: 2, currentWorkout: active, history: [previousRecord, previousPullRecord] }
   const restored = storage.normalizeAppData(before)
   assert.ok(restored)
   assert.equal(storage.isAppData(restored), true)
   assert.deepEqual(storage.normalizeAppData(restored), restored)
   assert.deepEqual(restored.currentWorkout, active)
-  assert.deepEqual(restored.history, [previousRecord])
+  assert.deepEqual(restored.history, [previousRecord, previousPullRecord])
   assert.equal(storage.createWorkoutRecord(restored.currentWorkout, 1_700_003_600_000).workoutName, 'Core & Legs')
   assert.equal(restored.history[0].workoutName, 'Core & Athleticism')
+  assert.equal(restored.history[1].exercises[0].name, 'Smith Machine Bent-Over Row')
+  assert.equal(restored.history[1].exercises[0].sets[0].weightKg, 50)
   assert.equal(workouts.workouts[(restored.rotationIndex + 1) % workouts.workouts.length].name, 'Push')
 })

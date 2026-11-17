@@ -4,7 +4,7 @@ import { SoundToggle } from './soundToggle'
 import { restPresets, type ActiveWorkout, type SetEntry, type WorkoutRecord } from './workoutStorage'
 import { PreviousPerformance } from './StrengthProgress'
 import { getWorkout, type ChecklistItem, type Exercise, type Workout } from './workouts'
-import { getExerciseMetricType } from './strengthAnalytics'
+import { formatKg, getExerciseMetricType, getExercisePerformances } from './strengthAnalytics'
 import {
   applySessionSubstitution,
   equipmentChoices,
@@ -254,9 +254,10 @@ export function WorkoutSession({
 } & RestTimerProps) {
   const completedExercises = activeWorkout.exercises.filter((exercise) => exercise.completed).length
   const allExercisesComplete = completedExercises === workout.exercises.length
+  const fieldWorkout = workout.id === 'pull' || workout.id === 'core'
 
   return (
-    <section className="workout-session panel" aria-label={`${workout.name} workout session`}>
+    <section className={`workout-session panel ${fieldWorkout ? 'field-workout' : ''}`} aria-label={`${workout.name} workout session`}>
       <header className="workout-session-header">
         <div>
           <div className="eyebrow">WORKOUT IN PROGRESS</div>
@@ -305,7 +306,7 @@ export function WorkoutSession({
             && workout.exercises[4]?.id === 'romanian-deadlift'
             && workout.exercises[7]?.id === 'farmer-carries'
           const programmeSection = isCurrentCoreTemplate
-            ? ({ 0: 'CORE / ABS', 4: 'LEGS', 7: 'ATHLETICISM' } as Record<number, string>)[index]
+            ? ({ 0: 'CORE', 4: 'LEGS', 7: 'ATHLETICISM' } as Record<number, string>)[index]
             : undefined
           const metricType = getExerciseMetricType(exercise.id, exercise.name, exercise.targetReps)
           const isSideSpecific = metricType === 'per-side' || metricType === 'per-side-time'
@@ -313,6 +314,21 @@ export function WorkoutSession({
           const distanceHeading = distanceUnit === 'km' ? 'KM' : 'M'
           const quantityLabel = metricType === 'timed' || metricType === 'per-side-time' ? 'seconds' : metricType === 'distance' ? `distance in ${distanceUnit}` : 'repetitions'
           const quantityHeading = metricType === 'timed' ? 'SEC' : metricType === 'per-side-time' ? 'SEC / SIDE' : metricType === 'distance' ? distanceHeading : metricType === 'per-side' ? 'REPS / SIDE' : 'REPS'
+          const sourceExerciseId = state.substitution?.originalExerciseId ?? exercise.id
+          const previousPerformance = fieldWorkout
+            ? getExercisePerformances(history, sourceExerciseId).filter((performance) => performance.sets.length > 0).at(-1)
+            : undefined
+          const currentExerciseIndex = activeWorkout.exercises.findIndex((item) => !item.completed)
+          const currentSetIndex = index === currentExerciseIndex ? state.sets.findIndex((set) => !set.completed) : -1
+          const previousSetLabel = (setIndex: number) => {
+            const previousSet = previousPerformance?.sets[setIndex]
+            if (!previousSet) return '—'
+            if (isSideSpecific && previousSet.leftReps != null && previousSet.rightReps != null) return `${previousSet.leftReps}/${previousSet.rightReps}`
+            if (previousSet.reps == null) return '—'
+            if (metricType === 'timed' || metricType === 'per-side-time') return `${previousSet.reps} s`
+            if (metricType === 'distance') return `${previousSet.reps} ${distanceUnit}`
+            return previousSet.weightKg === null ? `${previousSet.reps} reps` : `${formatKg(previousSet.weightKg)} × ${previousSet.reps}`
+          }
           return (
             <Fragment key={exercise.id}>
             {programmeSection && <div className="programme-section-divider"><span>{programmeSection}</span><i /></div>}
@@ -349,12 +365,13 @@ export function WorkoutSession({
               />
 
               <div className="set-table">
-                <div className={`set-row set-labels ${isSideSpecific ? 'set-row-sides' : ''}`} aria-hidden="true">
-                  <span>SET</span><span>{metricType === 'assisted' ? 'ASSIST KG' : 'KG'}</span>{isSideSpecific ? <><span>L · {quantityHeading.split('/')[0]}</span><span>R · {quantityHeading.split('/')[0]}</span></> : <span>{quantityHeading}</span>}<span>DONE</span><span />
+                <div className={`set-row set-labels ${isSideSpecific ? 'set-row-sides' : ''} ${fieldWorkout ? 'field-set-row' : ''}`} aria-hidden="true">
+                  <span>SET</span>{fieldWorkout && <span>PREVIOUS</span>}<span>{metricType === 'assisted' ? 'ASSIST KG' : 'KG'}</span>{isSideSpecific ? <><span>L · {quantityHeading.split('/')[0]}</span><span>R · {quantityHeading.split('/')[0]}</span></> : <span>{quantityHeading}</span>}<span>DONE</span><span />
                 </div>
                 {state.sets.map((set, setIndex) => (
-                  <div className={`set-row ${isSideSpecific ? 'set-row-sides' : ''}`} key={set.id}>
+                  <div className={`set-row ${isSideSpecific ? 'set-row-sides' : ''} ${fieldWorkout ? 'field-set-row' : ''} ${setIndex === currentSetIndex ? 'field-set-current' : ''} ${set.completed ? 'field-set-completed' : ''}`} key={set.id}>
                     <span className="set-index">{String(setIndex + 1).padStart(2, '0')}</span>
+                    {fieldWorkout && <span className="field-previous-value">{previousSetLabel(setIndex)}</span>}
                     <label className="visually-hidden" htmlFor={`${set.id}-weight`}>{exercise.name} set {setIndex + 1} {metricType === 'assisted' ? 'assistance' : 'load'} in kilograms</label>
                     <input
                       id={`${set.id}-weight`}

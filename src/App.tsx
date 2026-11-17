@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
+import { Fragment, useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { HistoryPage, WorkoutSession, type RestTimerProps } from './WorkoutFeatures'
 import { PerformanceDashboard } from './PerformanceDashboard'
 import { StrengthProgressPage } from './StrengthProgress'
@@ -1154,7 +1154,7 @@ function App() {
           {activeTab === 'body' && <BodyMeasurements />}
 
           {completedWorkout && (
-            <section className="workout-completion">
+            <section className={`workout-completion ${completedWorkout.workoutId === 'pull' || completedWorkout.workoutId === 'core' ? 'field-workout-completion' : ''}`}>
               <div className="completion-topline">
                 <span className="eyebrow">HUSHHUSS // SESSION CLEARED</span>
                 <span className="completion-status">COMPLETE</span>
@@ -1588,6 +1588,35 @@ function Overview({
   )
 }
 
+function RotationExerciseList({ workout }: { workout: Workout }) {
+  const sectionFor = (index: number) => index < 4 ? 'CORE' : index < 7 ? 'LEGS' : 'ATHLETICISM'
+  const isCoreAndLegs = workout.id === 'core'
+
+  return (
+    <div className={`rotation-exercises rotation-exercises-${workout.id}`} aria-label={`${workout.name} exercises`}>
+      {isCoreAndLegs && <div className="rotation-exercise-section-label">CORE</div>}
+      {workout.exercises.map((exercise, exerciseIndex) => {
+        const startsSection = isCoreAndLegs && [4, 7].includes(exerciseIndex)
+        const hasExplicitUnit = /\b(seconds?|secs?|sec|s|meters?|metres?|m|km|per side|per leg)\b/i.test(exercise.targetReps)
+        const target = hasExplicitUnit ? exercise.targetReps : `${exercise.targetReps} reps`
+
+        return (
+          <Fragment key={exercise.id}>
+            {startsSection && <div className="rotation-exercise-section-label">{sectionFor(exerciseIndex)}</div>}
+            <div className="rotation-exercise-row">
+              <span className="rotation-exercise-number">{String(exerciseIndex + 1).padStart(2, '0')}</span>
+              <div className="rotation-exercise-copy">
+                <span>{exercise.targetSets} sets · {target}</span>
+                <strong>{exercise.name}</strong>
+              </div>
+            </div>
+          </Fragment>
+        )
+      })}
+    </div>
+  )
+}
+
 function RotationPage({
   rotationIndex,
   onStart,
@@ -1675,7 +1704,7 @@ function RotationPage({
       <div className="rotation-list">
         {workouts.map((item, index) => (
           <article
-            className={`rotation-card panel ${
+            className={`rotation-card panel ${item.id === 'pull' || item.id === 'core' ? 'field-rotation-card' : ''} ${
               index === rotationIndex ? 'current' : ''
             }`}
             key={item.id}
@@ -1715,6 +1744,8 @@ function RotationPage({
             <div className="rotation-duration">
               <Icon name="clock" size={15} /> {item.duration}
             </div>
+
+            {(item.id === 'pull' || item.id === 'core') && <RotationExerciseList workout={item} />}
           </article>
         ))}
       </div>

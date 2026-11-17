@@ -128,14 +128,6 @@ export const workouts: Workout[] = [
         targetReps: '5–8',
       },
       {
-        id: 'smith-machine-bent-over-row',
-        name: 'Smith Machine Bent-Over Row',
-        focus: 'Back',
-        instructions: 'Set the Smith bar at a comfortable height. Hinge with a soft knee bend, keep your trunk steady, and row toward your lower ribs without jerking.',
-        targetSets: 3,
-        targetReps: '6–8',
-      },
-      {
         id: 'chest-supported-rows',
         name: 'Chest-Supported Row',
         focus: 'Back',

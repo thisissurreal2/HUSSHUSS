@@ -6977,6 +6977,213 @@ textarea:focus-visible {
   .completion-content { align-items: flex-start; }
 }
 
+/* Pull + Core & Legs · shared training field presentation */
+.field-rotation-card {
+  min-width: 0;
+  padding: 18px;
+  border-radius: 8px;
+}
+.field-rotation-card.current {
+  background: var(--panel);
+}
+.rotation-exercises {
+  display: grid;
+  gap: 2px;
+  margin-top: 18px;
+  padding-top: 13px;
+  border-top: 1px solid var(--line);
+}
+.rotation-exercise-section-label {
+  margin: 9px 0 3px;
+  color: var(--muted);
+  font: 700 11px/1.3 var(--font-mono);
+  letter-spacing: .12em;
+}
+.rotation-exercise-section-label:first-child { margin-top: 0; }
+.rotation-exercise-row {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+  min-height: 58px;
+  padding: 7px 0;
+  border-bottom: 1px solid rgba(233,232,225,.08);
+}
+.rotation-exercise-number {
+  color: var(--muted);
+  font: 500 11px/1 var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+.rotation-exercise-copy { display: grid; gap: 3px; min-width: 0; }
+.rotation-exercise-copy > span {
+  color: var(--muted);
+  font: 600 11px/1.35 var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+.rotation-exercise-copy > strong {
+  color: var(--text);
+  font: 600 15px/1.25 var(--font-display);
+  overflow-wrap: anywhere;
+}
+.field-workout .session-exercises { gap: 0; }
+.field-workout .session-exercise {
+  padding: 16px 14px;
+  border: 0;
+  border-top: 1px solid var(--line);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+.field-workout .session-exercise.exercise-current {
+  border-color: var(--line);
+  border-left: 3px solid var(--cyan);
+  background: rgba(54,229,255,.035);
+  box-shadow: none;
+}
+.field-workout .session-exercise.exercise-complete {
+  border-color: var(--line);
+}
+.field-workout .session-exercise-title h3 {
+  color: var(--text);
+  font: 600 19px/1.2 var(--font-display);
+  overflow-wrap: anywhere;
+}
+.field-workout .session-exercise-title > span,
+.field-workout .exercise-state {
+  font: 600 11px/1.35 var(--font-mono);
+  letter-spacing: .04em;
+}
+.field-workout .exercise-instructions {
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.field-workout .exercise-target {
+  min-height: 32px;
+  margin-top: 8px;
+  padding-inline: 10px;
+  color: var(--text);
+  font: 600 11px/1.3 var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+.field-workout .exercise-performance-note {
+  margin-block: 8px 0;
+  padding: 8px 10px;
+  border-left: 1px solid var(--line);
+  background: transparent;
+  font-size: 11px;
+  line-height: 1.45;
+}
+.field-workout .exercise-progression-plan { margin-top: 7px; }
+.field-workout .set-table {
+  overflow-x: auto;
+  margin-top: 12px;
+  padding: 5px 0 0;
+  border-top: 1px solid var(--line);
+  background: transparent;
+}
+.field-workout .set-row.field-set-row {
+  grid-template-columns: 28px minmax(56px, .9fr) minmax(44px, .8fr) minmax(42px, .8fr) 44px 28px;
+  gap: 5px;
+  min-height: 56px;
+  border-top-color: rgba(233,232,225,.08);
+}
+.field-workout .set-row.field-set-row.set-row-sides {
+  grid-template-columns: 25px minmax(48px, .9fr) minmax(38px, .7fr) minmax(34px, .65fr) minmax(34px, .65fr) 44px 24px;
+  gap: 4px;
+}
+.field-workout .set-row.field-set-row.set-labels {
+  min-height: 34px;
+  color: var(--muted);
+  font: 700 11px/1.2 var(--font-mono);
+  letter-spacing: .035em;
+}
+.field-workout .set-row.field-set-row.set-labels > span { min-width: 0; }
+.field-workout .field-previous-value {
+  min-width: 0;
+  color: var(--muted);
+  font: 500 11px/1.2 var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+.field-workout .set-index,
+.field-workout .set-input,
+.field-workout .set-complete-button,
+.rest-timer .timer-display {
+  font-variant-numeric: tabular-nums;
+}
+.field-workout .set-row.field-set-current {
+  border-block-color: rgba(54,229,255,.2);
+  background: rgba(54,229,255,.085);
+}
+.field-workout .set-row.field-set-current .field-previous-value,
+.field-workout .set-row.field-set-current .set-index { color: var(--text); }
+.field-workout .set-row.field-set-completed .set-input {
+  border-color: rgba(233,232,225,.12);
+  background: #17191d;
+  color: var(--muted);
+}
+.field-workout .set-complete-button { width: 44px; height: 44px; }
+.field-workout .set-complete-button.selected {
+  border-color: var(--lime);
+  background: rgba(198,243,74,.12);
+  color: var(--lime);
+}
+.field-workout .set-remove-button { width: 28px; min-width: 28px; }
+.field-workout .programme-section-divider {
+  margin: 20px 0 0;
+  color: var(--muted);
+  font: 700 10px/1.3 var(--font-mono);
+  letter-spacing: .14em;
+}
+.field-workout .programme-section-divider i { background: var(--line); }
+.field-workout .rest-timer {
+  padding: 13px 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+}
+.field-workout .timer-display {
+  font: 600 22px/1 var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+.field-workout-completion .completion-content { gap: 20px; }
+.field-workout-completion .completion-copy h1 { line-height: .95; }
+
+@media (min-width: 621px) {
+  .field-rotation-card { padding: 20px; }
+  .rotation-exercise-row { min-height: 62px; }
+  .rotation-exercise-copy > strong { font-size: 16px; }
+}
+@media (max-width: 620px) {
+  .field-rotation-card { padding: 15px; }
+  .rotation-exercise-row { min-height: 60px; }
+  .field-workout .session-exercise { padding: 14px 10px; }
+  .field-workout .session-exercise-title h3 { font-size: 17px; }
+  .field-workout .set-row.field-set-row {
+    grid-template-columns: 23px minmax(52px, .9fr) minmax(39px, .75fr) minmax(38px, .75fr) 44px 23px;
+    gap: 3px;
+  }
+  .field-workout .set-row.field-set-row.set-row-sides {
+    grid-template-columns: 22px minmax(43px, .85fr) minmax(34px, .65fr) minmax(31px, .6fr) minmax(31px, .6fr) 44px 23px;
+    gap: 2px;
+  }
+  .field-workout .set-row.field-set-row.set-labels { font-size: 11px; }
+  .field-workout .field-previous-value { font-size: 11px; }
+  .field-workout .set-remove-button { width: 23px; min-width: 23px; }
+}
+@media (max-width: 360px) {
+  .field-workout .set-row.field-set-row {
+    grid-template-columns: 20px minmax(43px, .85fr) minmax(34px, .7fr) minmax(34px, .7fr) 44px 23px;
+    gap: 2px;
+  }
+  .field-workout .set-row.field-set-row.set-row-sides {
+    grid-template-columns: 20px minmax(52px, .8fr) minmax(28px, .65fr) minmax(28px, .55fr) minmax(28px, .55fr) 44px 23px;
+  }
+}
+
 /* Phase 5 · Stage 2 progress and development presentation */
 .progress-tab-content,
 .performance-dashboard,
