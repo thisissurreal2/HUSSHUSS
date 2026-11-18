@@ -6,7 +6,7 @@ import type { ReadinessCheckIn } from './readiness'
 
 export function ReadinessDecisionPanel({ checkIn, workout, activeWorkout, onOpenCheckIn, onStartScaled, onSaveRecovery }: {
   checkIn?: ReadinessCheckIn
-  workout: Workout
+  workout: Workout | null
   activeWorkout: ActiveWorkout | null
   onOpenCheckIn: () => void
   onStartScaled: () => void
@@ -15,8 +15,8 @@ export function ReadinessDecisionPanel({ checkIn, workout, activeWorkout, onOpen
   const recommendation = getTrainingRecommendation(checkIn)
   const [recoveryOpen, setRecoveryOpen] = useState(false)
   const [recoverySaved, setRecoverySaved] = useState(false)
-  const scaled = recommendation.category === 'caution' ? createScaledWorkout(workout) : null
-  const originalSets = workout.exercises.reduce((sum, exercise) => sum + exercise.targetSets, 0)
+  const scaled = recommendation.category === 'caution' && workout ? createScaledWorkout(workout) : null
+  const originalSets = workout?.exercises.reduce((sum, exercise) => sum + exercise.targetSets, 0) ?? 0
   const scaledSets = scaled?.exercises.reduce((sum, exercise) => sum + exercise.targetSets, 0) ?? originalSets
 
   return <section className={`readiness-decision readiness-decision-${recommendation.category}`} aria-labelledby="readiness-recommendation-title">
@@ -26,7 +26,7 @@ export function ReadinessDecisionPanel({ checkIn, workout, activeWorkout, onOpen
     </div>
     {checkIn ? <div className="readiness-decision-meta"><b>{recommendation.category === 'ready' ? 'READY TO TRAIN' : recommendation.category === 'caution' ? 'TRAIN WITH CAUTION' : 'RECOVERY RANGE'}</b><span>{recommendation.factors.join(' · ')}</span></div> : null}
     <button className="button-text readiness-checkin-link" type="button" onClick={onOpenCheckIn}>{checkIn ? 'View / edit today’s check-in' : 'Complete today’s check-in'} <span aria-hidden="true">→</span></button>
-    {recommendation.category === 'caution' && scaled && <div className="readiness-adjustment">
+    {recommendation.category === 'caution' && scaled && workout && <div className="readiness-adjustment">
       <div className="readiness-adjustment-heading"><div><span className="eyebrow">OPTIONAL · YOU CHOOSE</span><h3>Scale back today’s session</h3></div><span>{originalSets} → {scaledSets} working sets</span></div>
       <p>Trim accessory volume first and keep every movement. Weights stay unchanged; your last logged performance is shown when available. Skip failure sets and adjust the load yourself if needed.</p>
       <div className="readiness-compare"><div><b>PLANNED · {originalSets} SETS</b>{workout.exercises.map((exercise) => <span key={exercise.id}>{exercise.name}<strong>{exercise.targetSets} sets</strong></span>)}</div><div><b>SCALED · {scaledSets} SETS</b>{scaled.exercises.map((exercise) => <span key={exercise.id}>{exercise.name}<strong>{exercise.targetSets} sets</strong></span>)}</div></div>
@@ -42,7 +42,7 @@ export function ReadinessDecisionPanel({ checkIn, workout, activeWorkout, onOpen
       {activeWorkout ? null : <button className="button-text" type="button" onClick={() => setRecoveryOpen((open) => !open)}>{recoveryOpen ? 'Close recovery options' : 'Prefer a recovery day? Log rest or gentle activity'}</button>}
       {recoveryOpen && !activeWorkout && <RecoveryEntryForm onSave={async (activity, duration, notes) => { const saved = await onSaveRecovery(activity, duration, notes); if (saved) { setRecoveryOpen(false); setRecoverySaved(true) } return saved }} />}
     </div>}
-    {recoverySaved && <p className="recovery-saved-note" role="status">Recovery day saved to your separate recovery history. Rotation and XP are unchanged.</p>}
+    {recoverySaved && <p className="recovery-saved-note" role="status">Recovery day saved to your separate recovery history. The weekday plan and XP are unchanged.</p>}
     {activeWorkout && recommendation.category !== 'recovery' && recommendation.category !== 'caution' && <p className="readiness-action-note">Your current workout stays unchanged. Adjust your effort by feel.</p>}
   </section>
 }
@@ -70,7 +70,7 @@ function RecoveryEntryForm({ onSave }: { onSave: (activity: RecoveryActivity, du
     <label>What feels right today?<select value={activity} onChange={(event) => setActivity(event.target.value as RecoveryActivity)}>{recoveryActivities.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}</select></label>
     <div className="recovery-entry-fields"><label>Duration · optional<input type="number" min="1" max="600" inputMode="numeric" value={duration} onChange={(event) => setDuration(event.target.value)} placeholder="Minutes" /></label><label>Note · optional<input maxLength={500} value={notes} onChange={(event) => setNotes(event.target.value)} placeholder="How it felt" /></label></div>
     {error && <p role="alert" className="recovery-form-error">{error}</p>}
-    <div className="recovery-entry-actions"><button className="button-primary" type="submit" disabled={saving}>{saving ? 'Saving…' : 'Save recovery day'}</button><small>Does not affect your workout rotation or XP.</small></div>
+    <div className="recovery-entry-actions"><button className="button-primary" type="submit" disabled={saving}>{saving ? 'Saving…' : 'Save recovery day'}</button><small>Does not change the weekday plan or XP.</small></div>
   </form>
 }
 

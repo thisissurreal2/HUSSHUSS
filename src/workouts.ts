@@ -1,4 +1,4 @@
-export type WorkoutId = 'push' | 'pull' | 'core'
+export type WorkoutId = 'push' | 'pull' | 'core' | 'arnold-chest-back' | 'arnold-shoulders-arms'
 
 export type Exercise = {
   id: string
@@ -43,28 +43,28 @@ export const workouts: Workout[] = [
     ],
     exercises: [
       {
-        id: 'barbell-bench-press',
-        name: 'Bench Press',
+        id: 'incline-smith-machine-bench-press',
+        name: 'Incline Smith Machine Bench Press',
         focus: 'Chest',
-        instructions: 'Keep your feet planted and wrists steady. Lower the bar under control to a comfortable touch point; use safeties or a spotter when appropriate.',
+        instructions: 'Set the Smith bench to a comfortable incline. Lower the bar under control and use the machine safeties as appropriate.',
         targetSets: 3,
-        targetReps: '5–8',
-      },
-      {
-        id: 'incline-dumbbell-press',
-        name: 'Incline Dumbbell Press',
-        focus: 'Chest',
-        instructions: 'Set the bench to a modest incline. Lower the dumbbells with control and use a comfortable range.',
-        targetSets: 3,
-        targetReps: '8–12',
+        targetReps: '6–10',
       },
       {
         id: 'pec-deck',
         name: 'Pec Deck',
         focus: 'Chest',
-        instructions: 'Set the seat so the handles align comfortably with your chest. Bring the arms together under control without forcing a deep stretch.',
+        instructions: 'Set the seat so the handles align comfortably with your chest. Bring the arms together under control.',
         targetSets: 3,
         targetReps: '10–15',
+      },
+      {
+        id: 'machine-chest-press',
+        name: 'Machine Chest Press',
+        focus: 'Chest',
+        instructions: 'Set the seat so the handles begin comfortably around mid-chest. Press smoothly without forcing the range.',
+        targetSets: 3,
+        targetReps: '8–12',
       },
       {
         id: 'machine-shoulder-press',
@@ -76,27 +76,27 @@ export const workouts: Workout[] = [
       },
       {
         id: 'dumbbell-lateral-raises',
-        name: 'Lateral Raises',
+        name: 'Dumbbell Lateral Raises',
         focus: 'Side shoulders',
         instructions: 'Use a light load, lift smoothly to a comfortable height, and avoid swinging.',
         targetSets: 3,
-        targetReps: '12–15',
+        targetReps: '12–20',
       },
       {
-        id: 'cable-tricep-pushdowns',
-        name: 'Cable Tricep Pushdowns',
+        id: 'single-arm-cable-tricep-pushdowns',
+        name: 'Single-Arm Cable Tricep Pushdowns',
         focus: 'Triceps',
-        instructions: 'Keep elbows near your sides and straighten your arms without rocking your torso.',
+        instructions: 'Use one handle and keep your elbow comfortably near your side. Complete each arm with control.',
         targetSets: 3,
-        targetReps: '10–15',
+        targetReps: '10–15 per arm',
       },
       {
         id: 'overhead-cable-tricep-extensions',
-        name: 'Overhead Cable Extensions',
+        name: 'Overhead Cable Tricep Extensions',
         focus: 'Triceps',
         instructions: 'Choose a comfortable shoulder position and extend smoothly without forcing the stretch.',
         targetSets: 2,
-        targetReps: '10–12',
+        targetReps: '10–15',
       },
     ],
     cooldown: [
@@ -128,6 +128,14 @@ export const workouts: Workout[] = [
         targetReps: '5–8',
       },
       {
+        id: 'seated-cable-row',
+        name: 'Seated Cable Row',
+        focus: 'Back',
+        instructions: 'Sit tall, brace gently, and draw the handle toward your lower ribs without rocking your torso.',
+        targetSets: 3,
+        targetReps: '8–12',
+      },
+      {
         id: 'chest-supported-rows',
         name: 'Chest-Supported Row',
         focus: 'Back',
@@ -136,18 +144,10 @@ export const workouts: Workout[] = [
         targetReps: '8–12',
       },
       {
-        id: 'reverse-pec-deck',
-        name: 'Reverse Pec Deck',
-        focus: 'Rear shoulders',
-        instructions: 'Set the seat so handles are around shoulder height. Sweep your arms back with a light, controlled load.',
-        targetSets: 2,
-        targetReps: '12–15',
-      },
-      {
-        id: 'preacher-curls',
-        name: 'Preacher Curls',
+        id: 'incline-dumbbell-curls',
+        name: 'Incline Dumbbell Curls',
         focus: 'Biceps',
-        instructions: 'Keep your upper arms supported and lower the weight slowly through a comfortable range.',
+        instructions: 'Set a modest bench incline, let the arms hang comfortably, and curl without swinging.',
         targetSets: 3,
         targetReps: '8–12',
       },
@@ -156,8 +156,16 @@ export const workouts: Workout[] = [
         name: 'Hammer Curls',
         focus: 'Biceps · forearms',
         instructions: 'Keep palms facing inward and elbows close to your sides. Avoid using momentum.',
+        targetSets: 3,
+        targetReps: '10–15',
+      },
+      {
+        id: 'reverse-pec-deck',
+        name: 'Reverse Pec Deck',
+        focus: 'Rear shoulders',
+        instructions: 'Set the seat so handles are around shoulder height. Sweep your arms back with a light, controlled load.',
         targetSets: 2,
-        targetReps: '10–12',
+        targetReps: '12–15',
       },
     ],
     cooldown: [
@@ -266,7 +274,69 @@ export const workouts: Workout[] = [
       { id: 'calf-stretch', name: 'Calf stretch · 30 sec per side', instructions: 'With hands supported on a wall, step one foot back and gently press the heel toward the floor.' },
     ],
   },
+  {
+    id: 'arnold-chest-back',
+    name: 'Arnold — Chest & Back',
+    focus: 'Chest · back',
+    description: 'A paired chest and back session with a steady, controlled pace.',
+    duration: '40–50 min',
+    warmup: [
+      { id: 'light-cardio', name: 'Light cycling or treadmill · 3–5 min', instructions: 'Move at an easy pace to warm up without tiring yourself.' },
+      { id: 'arm-circles', name: 'Arm circles · 15 each direction', instructions: 'Make smooth, comfortable circles, gradually widening the range.' },
+      { id: 'bench-warmup-sets', name: 'Bench press warm-up · 1–2 ramp-up sets', instructions: 'Start very light and add a little weight each set. These do not count as working sets.' },
+    ],
+    exercises: [
+      { id: 'barbell-bench-press', name: 'Barbell Bench Press', focus: 'Chest', instructions: 'Keep your feet planted and wrists steady. Lower the bar under control; use safeties or a spotter where appropriate.', targetSets: 3, targetReps: '6–10' },
+      { id: 'lat-pulldown', name: 'Lat Pulldown', focus: 'Back', instructions: 'Set the thigh pad securely and pull the bar toward your upper chest with control.', targetSets: 3, targetReps: '8–12' },
+      { id: 'incline-dumbbell-press', name: 'Incline Dumbbell Press', focus: 'Chest', instructions: 'Set the bench to a modest incline. Lower the dumbbells with control through a comfortable range.', targetSets: 2, targetReps: '8–12' },
+      { id: 'standing-t-bar-row', name: 'Standing T-Bar Row', focus: 'Back', instructions: 'Stand in a stable stance, hinge comfortably, and row the handle toward your torso without jerking.', targetSets: 3, targetReps: '8–12' },
+      { id: 'pec-deck', name: 'Pec Deck', focus: 'Chest', instructions: 'Align the handles comfortably with your chest and bring the arms together under control.', targetSets: 2, targetReps: '12–15' },
+    ],
+    cooldown: [
+      { id: 'doorway-chest-stretch', name: 'Doorway chest stretch · 30 sec per side', instructions: 'Rest your forearm on a doorframe and turn gently away until you feel a mild chest stretch.' },
+      { id: 'lat-stretch', name: 'Lat stretch · 30 sec per side', instructions: 'Reach one arm overhead and lean gently to the other side without forcing your shoulder.' },
+    ],
+  },
+  {
+    id: 'arnold-shoulders-arms',
+    name: 'Arnold — Shoulders & Arms',
+    focus: 'Shoulders · biceps · triceps',
+    description: 'Focused shoulder and arm work with controlled isolation movements.',
+    duration: '35–45 min',
+    warmup: [
+      { id: 'light-cardio', name: 'Light cycling or treadmill · 3–5 min', instructions: 'Move at an easy pace to warm up without tiring yourself.' },
+      { id: 'arm-circles', name: 'Arm circles · 15 each direction', instructions: 'Make smooth, comfortable circles, gradually widening the range.' },
+      { id: 'band-pull-aparts', name: 'Band pull-aparts · 15 reps', instructions: 'Use light tension and draw the band apart with control.' },
+    ],
+    exercises: [
+      { id: 'dumbbell-lateral-raises', name: 'Dumbbell Lateral Raises', focus: 'Side shoulders', instructions: 'Use a light load, lift smoothly to a comfortable height, and avoid swinging.', targetSets: 3, targetReps: '12–20' },
+      { id: 'reverse-pec-deck', name: 'Reverse Pec Deck', focus: 'Rear shoulders', instructions: 'Set the seat so handles are around shoulder height. Sweep your arms back with control.', targetSets: 3, targetReps: '12–15' },
+      { id: 'preacher-curls', name: 'Preacher Curls', focus: 'Biceps', instructions: 'Keep your upper arms supported and lower the weight slowly through a comfortable range.', targetSets: 3, targetReps: '8–12' },
+      { id: 'overhead-cable-tricep-extensions', name: 'Overhead Cable Tricep Extensions', focus: 'Triceps', instructions: 'Choose a comfortable shoulder position and extend smoothly without forcing the stretch.', targetSets: 3, targetReps: '10–15' },
+      { id: 'cable-curls', name: 'Cable Bicep Curls', focus: 'Biceps', instructions: 'Keep your elbows steady and curl through a comfortable range without swinging.', targetSets: 2, targetReps: '10–15' },
+      { id: 'cable-tricep-pushdowns', name: 'Cable Tricep Pushdowns', focus: 'Triceps', instructions: 'Keep your elbows near your sides and straighten your arms without rocking your torso.', targetSets: 2, targetReps: '10–15' },
+    ],
+    cooldown: [
+      { id: 'cross-body-shoulder-stretch', name: 'Cross-body shoulder stretch · 30 sec per side', instructions: 'Bring one arm across your chest and support it gently. Do not pull into pain.' },
+      { id: 'overhead-triceps-stretch', name: 'Overhead triceps stretch · 30 sec per side', instructions: 'Raise one arm and bend the elbow; use the other hand lightly. Keep the stretch gentle and pain-free.' },
+    ],
+  },
 ]
+
+export const weeklyGymSchedule = [
+  { day: 'Monday', dayOfWeek: 1, workoutId: 'push' },
+  { day: 'Tuesday', dayOfWeek: 2, workoutId: 'pull' },
+  { day: 'Wednesday', dayOfWeek: 3, workoutId: 'core' },
+  { day: 'Thursday', dayOfWeek: 4, workoutId: 'arnold-chest-back' },
+  { day: 'Friday', dayOfWeek: 5, workoutId: 'arnold-shoulders-arms' },
+  { day: 'Saturday', dayOfWeek: 6, workoutId: null },
+  { day: 'Sunday', dayOfWeek: 0, workoutId: null },
+] as const
+
+export function getScheduledWorkoutForDate(date: Date): Workout | null {
+  const scheduledId = weeklyGymSchedule.find((entry) => entry.dayOfWeek === date.getDay())?.workoutId
+  return scheduledId ? workouts.find((item) => item.id === scheduledId) ?? null : null
+}
 
 export function getWorkout(workoutId: WorkoutId): Workout {
   const workout = workouts.find((item) => item.id === workoutId)

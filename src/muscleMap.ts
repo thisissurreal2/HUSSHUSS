@@ -58,6 +58,8 @@ export function getMuscleLabel(id: MuscleId): string {
 
 export const exerciseMuscleMap: Record<string, ExerciseMuscleEntry> = {
   // ── Current rotation: Push ──────────────────────────────────────────────
+  'incline-smith-machine-bench-press': { weights: { chest: 1, triceps: 0.5, shoulders: 0.5 } },
+  'single-arm-cable-tricep-pushdowns': { weights: { triceps: 1 } },
   'barbell-bench-press': {
     weights: { chest: 1, triceps: 0.5, shoulders: 0.5 },
     notes: 'Shoulders = front delts.',
@@ -97,6 +99,9 @@ export const exerciseMuscleMap: Record<string, ExerciseMuscleEntry> = {
     weights: { back: 1, biceps: 0.5, shoulders: 0.25 },
     notes: 'Shoulders = rear delts.',
   },
+  'seated-cable-row': { weights: { back: 1, biceps: 0.5 } },
+  'standing-t-bar-row': { weights: { back: 1, biceps: 0.5, shoulders: 0.25 } },
+  'incline-dumbbell-curls': { weights: { biceps: 1 } },
   'single-arm-cable-rows': {
     weights: { back: 1, biceps: 0.5 },
   },

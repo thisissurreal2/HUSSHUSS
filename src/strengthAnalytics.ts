@@ -45,7 +45,7 @@ export type ProgressionPlan = {
 }
 
 function repRange(target: string): { low: number; high: number; unit: string } | null {
-  const perSide = target.match(/^\s*(\d+(?:\.\d+)?)\s*([-–]\s*\d+(?:\.\d+)?)?\s*(seconds?|secs?|sec|s)?\s*per\s+(side|leg)\s*$/i)
+  const perSide = target.match(/^\s*(\d+(?:\.\d+)?)\s*([-–]\s*\d+(?:\.\d+)?)?\s*(seconds?|secs?|sec|s)?\s*per\s+(side|leg|arm)\s*$/i)
   if (perSide) {
     const high = perSide[2] ? Number(perSide[2].replace(/[-–]/, '').trim()) : Number(perSide[1])
     return { low: Number(perSide[1]), high, unit: `${perSide[3] ? 'sec' : 'reps'}/${perSide[4].toLowerCase()}` }
@@ -59,7 +59,7 @@ function repRange(target: string): { low: number; high: number; unit: string } |
 
 export function getExerciseMetricType(exerciseId: string, name: string, targetReps: string): ExerciseMetricType {
   if (/assisted/i.test(`${exerciseId} ${name}`)) return 'assisted'
-  if (/per\s+(side|leg)/i.test(targetReps)) return /seconds?|secs?|\bsec\b|\bs\b/i.test(targetReps) ? 'per-side-time' : 'per-side'
+  if (/per\s+(side|leg|arm)/i.test(targetReps)) return /seconds?|secs?|\bsec\b|\bs\b/i.test(targetReps) ? 'per-side-time' : 'per-side'
   if (/seconds?|secs?|\bsec\b|\bs\b/i.test(targetReps)) return 'timed'
   if (/meters?|metres?|\bm\b|\bkm\b|\bdistance\b/i.test(targetReps)) return 'distance'
   return 'reps'
@@ -119,7 +119,8 @@ export function getProgressionPlan(
   const parsedRange = repRange(exercise.targetReps)
   const targetMinimum = parsedRange?.low ?? null
   const targetMaximum = parsedRange?.high ?? null
-  const unit = metricType === 'timed' ? 'sec' : metricType === 'per-side-time' ? 'sec/side' : metricType === 'per-side' ? 'reps/side' : metricType === 'distance' ? (parsedRange?.unit ?? 'm') : 'reps'
+  const sideUnit = /per\s+arm/i.test(exercise.targetReps) ? 'arm' : /per\s+leg/i.test(exercise.targetReps) ? 'leg' : 'side'
+  const unit = metricType === 'timed' ? 'sec' : metricType === 'per-side-time' ? `sec/${sideUnit}` : metricType === 'per-side' ? `reps/${sideUnit}` : metricType === 'distance' ? (parsedRange?.unit ?? 'm') : 'reps'
   const reducedNote = readinessAdjusted
     ? ` Today’s readiness adjustment sets ${todaySetCount} working sets; it does not lower your normal progression target of ${exercise.targetSets}.`
     : ''

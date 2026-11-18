@@ -9,6 +9,7 @@ import { isActiveIsoSession, isIsoScheduleEntry, isIsoSessionRecord, type Active
 
 export const STORAGE_KEY = 'husshuss.data'
 export const DATA_VERSION = 2
+const LEGACY_ROTATION_LENGTH = 3
 
 export type SetEntry = {
   id: string
@@ -288,7 +289,7 @@ type LegacyAppData = Omit<AppData, 'version' | 'currentWorkout'> & {
   currentWorkout: LegacyActiveWorkout | null
 }
 
-const legacyExerciseIds: Record<WorkoutId, string[]> = {
+const legacyExerciseIds: Partial<Record<WorkoutId, string[]>> = {
   push: ['dumbbell-bench-press', 'seated-shoulder-press', 'cable-fly', 'goblet-squat'],
   pull: ['lat-pulldown', 'chest-supported-row', 'face-pull', 'romanian-deadlift'],
   core: ['dead-bug', 'pallof-press', 'front-plank', 'seated-calf-raise'],
@@ -316,6 +317,7 @@ function isLegacyActiveWorkout(value: unknown): value is LegacyActiveWorkout {
     return false
   }
   const ids = legacyExerciseIds[value.workoutId]
+  if (!ids) return false
   return value.exercises.length === ids.length
     && value.exercises.every((exercise, index) => isObject(exercise)
       && exercise.exerciseId === ids[index]
@@ -370,7 +372,7 @@ function isWorkoutRecord(value: unknown): value is WorkoutRecord {
 export function isAppData(value: unknown): value is AppData {
   if (!isObject(value) || value.version !== DATA_VERSION
     || !Number.isInteger(value.rotationIndex)
-    || (value.rotationIndex as number) < 0 || (value.rotationIndex as number) >= workouts.length
+    || (value.rotationIndex as number) < 0 || (value.rotationIndex as number) >= LEGACY_ROTATION_LENGTH
     || !(value.currentWorkout === null || isActiveWorkout(value.currentWorkout))
     || !Array.isArray(value.history) || !value.history.every(isWorkoutRecord)
     || !Number.isInteger(value.restDurationSeconds) || (value.restDurationSeconds as number) < MIN_REST_SECONDS || (value.restDurationSeconds as number) > MAX_REST_SECONDS
@@ -421,7 +423,9 @@ export function isAppData(value: unknown): value is AppData {
     && new Set(isoTeFleSessions.map((session) => session.id)).size === isoTeFleSessions.length
     && (!activeIsoTeFleSession || !isoTeFleSessions.some((session) => session.id === activeIsoTeFleSession.id))
     && new Set(isoTeFleSchedule.map((entry) => entry.id)).size === isoTeFleSchedule.length
-    && (!activeWorkout || activeWorkout.workoutId === workouts[value.rotationIndex as number].id)
+    // The active session owns a full template snapshot. The legacy rotationIndex
+    // remains preserved for older backups, but weekday scheduling selects the
+    // new session independently of that historical cursor.
     && (!activeWorkout || !ids.includes(activeWorkout.id))
     && ((value.timerRunning as boolean) === (value.timerDeadline !== null))
 }
@@ -429,7 +433,7 @@ export function isAppData(value: unknown): value is AppData {
 function isLegacyAppData(value: unknown): value is LegacyAppData {
   if (!isObject(value) || value.version !== 1
     || !Number.isInteger(value.rotationIndex)
-    || (value.rotationIndex as number) < 0 || (value.rotationIndex as number) >= workouts.length
+    || (value.rotationIndex as number) < 0 || (value.rotationIndex as number) >= LEGACY_ROTATION_LENGTH
     || !(value.currentWorkout === null || isLegacyActiveWorkout(value.currentWorkout))
     || !Array.isArray(value.history) || !value.history.every(isWorkoutRecord)
     || !Number.isInteger(value.restDurationSeconds) || (value.restDurationSeconds as number) < MIN_REST_SECONDS || (value.restDurationSeconds as number) > MAX_REST_SECONDS

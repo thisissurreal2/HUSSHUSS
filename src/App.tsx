@@ -31,7 +31,7 @@ import {
   type ActiveWorkout,
   type AppData,
 } from './workoutStorage'
-import { getLowerBodyExercises, workouts, type Workout, type WorkoutId } from './workouts'
+import { getLowerBodyExercises, getScheduledWorkoutForDate, weeklyGymSchedule, workouts, type Workout, type WorkoutId } from './workouts'
 import { ExtrasPage } from './ExtrasPage'
 import { IsoTeFlePage } from './IsoTeFle'
 import { ReadinessPage } from './ReadinessView'
@@ -137,11 +137,13 @@ function App() {
   const timerWarningRef = useRef<string | null>(null)
   const finishingWorkoutRef = useRef(false)
 
-  const [now] = useState(() => new Date())
-
-  const workout = data.currentWorkout
-    ? data.currentWorkout.template
-    : workouts[data.rotationIndex]
+  const [now, setNow] = useState(() => new Date())
+  useEffect(() => {
+    const interval = window.setInterval(() => setNow(new Date()), 60_000)
+    return () => window.clearInterval(interval)
+  }, [])
+  const scheduledWorkout = getScheduledWorkoutForDate(now)
+  const workout = data.currentWorkout?.template ?? scheduledWorkout
 
   const dateLabel = new Intl.DateTimeFormat('en', {
     weekday: 'long',
@@ -258,10 +260,12 @@ function App() {
       return
     }
 
-    const nextWorkoutId: WorkoutId = workouts[current.rotationIndex].id
+    const scheduledWorkout = getScheduledWorkoutForDate(new Date())
+    if (!scheduledWorkout) return
+    const nextWorkoutId: WorkoutId = scheduledWorkout.id
     const todayCheckIn = current.readiness?.find((entry) => entry.date === getLocalDateKey())
     const shouldScale = applyScaleBack && getTrainingRecommendation(todayCheckIn).category === 'caution'
-    const workoutTemplate = shouldScale ? chooseWorkoutPlan(workouts[current.rotationIndex], true) : undefined
+    const workoutTemplate = shouldScale ? chooseWorkoutPlan(scheduledWorkout, true) : undefined
 
     updateData((latest) => ({
       ...latest,
@@ -356,7 +360,6 @@ function App() {
 
       const next: AppData = {
         ...previous,
-        rotationIndex: (previous.rotationIndex + 1) % workouts.length,
         currentWorkout: null,
         history: [record, ...previous.history],
         recoverySelected: false,
@@ -843,6 +846,7 @@ function App() {
           {activeTab === 'overview' && (
             <Overview
               workout={workout}
+              today={now}
               activeWorkout={data.currentWorkout}
               preferredSubstitutions={data.preferredSubstitutions ?? {}}
               onSavePreferredSubstitution={(sourceId, candidateId) => updateData((current) => ({
@@ -915,7 +919,8 @@ function App() {
 
           {activeTab === 'rotation' && (
             <RotationPage
-              rotationIndex={data.rotationIndex}
+              workout={workout}
+              today={now}
               onStart={startWorkout}
               todayReadiness={(data.readiness ?? []).find((entry) => entry.date === getLocalDateKey())}
               activeWorkout={data.currentWorkout}
@@ -1124,7 +1129,7 @@ function App() {
                   <div className="completion-stats">
                     <span>WORKOUT SAVED</span>
                     <span>PROGRESS UPDATED</span>
-                    <span>ROTATION ADVANCED</span>
+                    <span>WEEKLY PLAN CONTINUES</span>
                   </div>
 
                   <button
@@ -1240,6 +1245,7 @@ function App() {
 
 function Overview({
   workout,
+  today,
   activeWorkout,
   preferredSubstitutions,
   onSavePreferredSubstitution,
@@ -1263,7 +1269,8 @@ function Overview({
   onStartScaled,
   onSaveRecovery,
 }: {
-  workout: Workout
+  workout: Workout | null
+  today: Date
   activeWorkout: ActiveWorkout | null
   preferredSubstitutions: Record<string, string>
   onSavePreferredSubstitution: (sourceId: string, candidateId: string) => void
@@ -1289,11 +1296,13 @@ function Overview({
 }) {
   const dayStatus = activeWorkout
     ? 'active'
-    : recoverySelected
-      ? 'recovery'
-      : 'planned'
+    : !workout
+      ? 'rest'
+      : recoverySelected
+        ? 'recovery'
+        : 'planned'
 
-  const lowerBodyExercises = getLowerBodyExercises(workout)
+  const lowerBodyExercises = workout ? getLowerBodyExercises(workout) : []
 
   return (
     <>
@@ -1333,38 +1342,48 @@ function Overview({
               ? 'TODAY · RECOVERY'
               : dayStatus === 'active'
                 ? 'WORKOUT IN PROGRESS'
-                : 'YOUR NEXT SESSION'}
+                : dayStatus === 'rest'
+                  ? 'TODAY · REST DAY'
+                  : `${new Intl.DateTimeFormat('en', { weekday: 'long' }).format(today)} · SCHEDULED`}
           </div>
 
           <h2>
             {dayStatus === 'recovery'
               ? 'Take the space you need.'
               : dayStatus === 'active'
-                ? `${workout.name}, in progress.`
-                : `${workout.name}, on your terms.`}
+                ? `${activeWorkout?.template.name ?? 'Workout'}, in progress.`
+                : dayStatus === 'rest'
+                  ? 'Recovery is part of the plan.'
+                  : `${workout?.name ?? 'Workout'}, on your terms.`}
           </h2>
 
           <p>
             {dayStatus === 'recovery'
-              ? `Your next session is still ${workout.name}. Pick it up when you feel ready.`
+              ? 'Today’s scheduled workout is not moved. The next weekday follows the plan.'
               : dayStatus === 'active'
                 ? `${
                     activeWorkout?.exercises.filter(
                       (exercise) => !exercise.completed,
                     ).length ?? 0
                   } exercises left. Your session is saved on this device.`
-                : workout.description}
+                : dayStatus === 'rest'
+                  ? 'Saturday and Sunday are rest days. There is no gym session to catch up on.'
+                  : workout?.description}
           </p>
 
           {dayStatus === 'active' ? (
             <button className="button-primary" onClick={onResume}>
               Resume workout <Icon name="arrow" size={17} />
             </button>
+          ) : dayStatus === 'rest' ? (
+            <button className="button-secondary" onClick={onOpenRotation}>
+              View weekly plan <Icon name="arrow" size={17} />
+            </button>
           ) : (
             <button className="button-primary" onClick={onStart}>
               {dayStatus === 'recovery'
-                ? `Start ${workout.name} when ready`
-                : `Start ${workout.name} workout`}
+                ? `Start ${workout?.name ?? 'scheduled workout'} when ready`
+                : `Start ${workout?.name ?? 'scheduled workout'} workout`}
               <Icon name="arrow" size={17} />
             </button>
           )}
@@ -1397,14 +1416,14 @@ function Overview({
             <Icon name="clock" size={15} />{' '}
             {dayStatus === 'recovery'
               ? 'No schedule to catch up on'
-              : workout.duration}
+              : workout?.duration ?? 'No gym session scheduled'}
           </span>
 
           <span className="hero-foot-divider" />
 
           <span>
             <Icon name="target" size={15} />{' '}
-            {dayStatus === 'recovery' ? 'Next up' : workout.focus}
+            {dayStatus === 'recovery' ? 'Recovery' : dayStatus === 'rest' ? 'Rest' : workout?.focus}
           </span>
         </div>
       </section>
@@ -1418,36 +1437,33 @@ function Overview({
         </div>
 
         <button className="text-link" onClick={onOpenRotation}>
-          See rotation <Icon name="arrow" size={16} />
+          See weekly schedule <Icon name="arrow" size={16} />
         </button>
       </div>
 
       <div className="dashboard-grid">
         <section className="panel next-panel">
           <div className="panel-topline">
-            <span className="panel-label">UP NEXT</span>
+            <span className="panel-label">{workout ? 'TODAY’S SESSION' : 'TODAY'}</span>
 
-            <span className="tiny-pill">
-              <span className="status-dot" /> READY WHEN YOU ARE
-            </span>
+            {workout ? <span className="tiny-pill"><span className="status-dot" /> READY WHEN YOU ARE</span> : <span className="tiny-pill"><Icon name="moon" size={14} /> REST DAY</span>}
           </div>
 
           <div className="next-workout-row">
             <div className="workout-index">
-              {String(
-                workouts.findIndex((item) => item.id === workout.id) + 1,
-              ).padStart(2, '0')}
+              {workout ? String(workouts.findIndex((item) => item.id === workout.id) + 1).padStart(2, '0') : '—'}
             </div>
 
             <div className="next-workout-copy">
-              <h3>{workout.name}</h3>
-              <p>{workout.focus}</p>
+              <h3>{workout?.name ?? 'Rest day'}</h3>
+              <p>{workout?.focus ?? 'Recovery · no gym session scheduled'}</p>
             </div>
 
             <button
               className="round-arrow"
               onClick={onStart}
-              aria-label={activeWorkout ? 'Resume workout' : 'Start workout'}
+              disabled={!workout && !activeWorkout}
+              aria-label={activeWorkout ? 'Resume workout' : workout ? 'Start workout' : 'Rest day'}
             >
               <Icon name="chevron" size={18} />
             </button>
@@ -1465,14 +1481,14 @@ function Overview({
                 {lowerBodyExercises.length === 0 ? 'SESSION EMPHASIS' : lowerBodyExercises.length === 1 ? 'LOWER-BODY MOVEMENT' : 'LOWER-BODY EMPHASIS'}
               </span>
               <strong>
-                {lowerBodyExercises.length ? lowerBodyExercises.map((exercise) => exercise.name).join(' · ') : workout.focus}
+                {lowerBodyExercises.length ? lowerBodyExercises.map((exercise) => exercise.name).join(' · ') : workout?.focus ?? 'Take the day off or log gentle recovery.'}
               </strong>
             </div>
           </div>
 
           <p className="panel-footnote">
-            Lower-body focus changes each session. Keep the effort
-            comfortable; take recovery whenever you need it.
+            Follow the weekday plan, and use recovery when it fits. Missed
+            sessions are not carried forward or added to history.
           </p>
         </section>
 
@@ -1484,17 +1500,14 @@ function Overview({
           <div className="eyebrow">RECOVERY COUNTS</div>
           <h3>No streaks. No pressure.</h3>
 
-          <p>
-            There’s no daily target to keep up with. Rest days never move
-            your rotation forward.
-          </p>
+          <p>There’s no daily target to keep up with. Rest days never create missed workouts or shift the weekday plan.</p>
 
           <div className="recovery-footer">
             <span className="recovery-status">
               <span className="status-dot" />{' '}
               {dayStatus === 'recovery'
                 ? 'RECOVERY SELECTED'
-                : 'OPTIONAL, ALWAYS'}
+              : dayStatus === 'rest' ? 'SCHEDULED REST DAY' : 'OPTIONAL, ALWAYS'}
             </span>
 
             {dayStatus === 'planned' && (
@@ -1522,7 +1535,7 @@ function Overview({
       {activeWorkout && (
         <div id="active-workout">
           <WorkoutSession
-            workout={workout}
+            workout={activeWorkout.template}
             activeWorkout={activeWorkout}
             preferredSubstitutions={preferredSubstitutions}
             onSavePreferredSubstitution={onSavePreferredSubstitution}
@@ -1548,7 +1561,7 @@ function RotationExerciseList({ workout }: { workout: Workout }) {
       {isCoreAndLegs && <div className="rotation-exercise-section-label">CORE</div>}
       {workout.exercises.map((exercise, exerciseIndex) => {
         const startsSection = isCoreAndLegs && [4, 7].includes(exerciseIndex)
-        const hasExplicitUnit = /\b(seconds?|secs?|sec|s|meters?|metres?|m|km|per side|per leg)\b/i.test(exercise.targetReps)
+        const hasExplicitUnit = /\b(seconds?|secs?|sec|s|meters?|metres?|m|km|per side|per leg|per arm)\b/i.test(exercise.targetReps)
         const target = hasExplicitUnit ? exercise.targetReps : `${exercise.targetReps} reps`
 
         return (
@@ -1569,7 +1582,8 @@ function RotationExerciseList({ workout }: { workout: Workout }) {
 }
 
 function RotationPage({
-  rotationIndex,
+  workout,
+  today,
   onStart,
   todayReadiness,
   activeWorkout,
@@ -1578,7 +1592,8 @@ function RotationPage({
   onSaveRecovery,
   onOpenExtras,
 }: {
-  rotationIndex: number
+  workout: Workout | null
+  today: Date
   onStart: () => void
   todayReadiness?: ReadinessCheckIn
   activeWorkout: ActiveWorkout | null
@@ -1591,21 +1606,19 @@ function RotationPage({
     <>
       <div className="page-heading">
         <div>
-          <div className="eyebrow">A FLEXIBLE TRAINING RHYTHM</div>
-          <h1>Your rotation.</h1>
-          <p className="page-subtitle">
-            Continue where you left off. No daily schedule required.
-          </p>
+          <div className="eyebrow">FIXED WEEKDAY TRAINING PLAN</div>
+          <h1>Your weekly plan.</h1>
+          <p className="page-subtitle">Monday through Friday training, with Saturday and Sunday for rest.</p>
         </div>
 
         <div className="weekly-chip">
-          <Icon name="moon" size={16} /> REST DAYS ARE BUILT IN
+          <Icon name="moon" size={16} /> SAT + SUN · REST
         </div>
       </div>
 
       <ReadinessDecisionPanel
         checkIn={todayReadiness}
-        workout={workouts[rotationIndex]}
+        workout={workout}
         activeWorkout={activeWorkout}
         onOpenCheckIn={onOpenReadiness}
         onStartScaled={onStartScaled}
@@ -1613,26 +1626,15 @@ function RotationPage({
       />
 
       <section className="rotation-intro panel">
-        <div className="rotation-intro-icon">
-          <Icon name="activity" size={21} />
-        </div>
-
+        <div className="rotation-intro-icon"><Icon name={workout ? 'activity' : 'moon'} size={21} /></div>
         <div>
-          <div className="eyebrow">
-            UP NEXT · {String(rotationIndex + 1).padStart(2, '0')} OF 03
-          </div>
-
-          <h2>{workouts[rotationIndex].name}</h2>
-
-          <p>
-            The sequence only moves forward when you mark a session
-            complete. A recovery day leaves it right here.
-          </p>
+          <div className="eyebrow">TODAY · {new Intl.DateTimeFormat('en', { weekday: 'long' }).format(today).toUpperCase()}</div>
+          <h2>{activeWorkout ? `${activeWorkout.template.name} in progress` : workout?.name ?? 'Rest day'}</h2>
+          <p>{activeWorkout ? 'Your saved session remains available to resume.' : workout ? 'Start today’s scheduled session when you are ready. Missed weekday sessions are not moved or added to history.' : 'Rest is scheduled today. No gym session is carried forward.'}</p>
         </div>
-
-        <button className="button-primary" onClick={onStart}>
-          Start workout <Icon name="arrow" size={17} />
-        </button>
+        {activeWorkout || workout
+          ? <button className="button-primary" onClick={onStart}>{activeWorkout ? 'Resume workout' : 'Start workout'} <Icon name="arrow" size={17} /></button>
+          : <span className="tiny-pill"><Icon name="moon" size={14} /> RECOVERY DAY</span>}
       </section>
 
       <section className="extras-plan-entry panel">
@@ -1643,7 +1645,7 @@ function RotationPage({
           <h2>EXTRAS LIBRARY</h2>
           <p>
             Neck, grip, calves, posture, athleticism and mobility. Never
-            part of your main rotation.
+            part of the weekday gym schedule.
           </p>
         </div>
 
@@ -1653,58 +1655,24 @@ function RotationPage({
       </section>
 
       <div className="rotation-list">
-        {workouts.map((item, index) => (
-          <article
-            className={`rotation-card panel ${item.id === 'pull' || item.id === 'core' ? 'field-rotation-card' : ''} ${
-              index === rotationIndex ? 'current' : ''
-            }`}
-            key={item.id}
-          >
-            <div className="rotation-card-top">
-              <span className="rotation-card-number">
-                {String(index + 1).padStart(2, '0')}
-              </span>
-
-              {index === rotationIndex && (
-                <span className="tiny-pill">
-                  <span className="status-dot" /> UP NEXT
-                </span>
-              )}
-            </div>
-
-            <h3>{item.name}</h3>
-            <p>{item.focus}</p>
-
-            <div className="rotation-card-divider" />
-
-            <div className="leg-exercise">
-              <span className="leg-icon">
-                <Icon name="activity" size={17} />
-              </span>
-
-              <div>
-                <span className="micro-label">
-                  {getLowerBodyExercises(item).length === 0 ? 'SESSION EMPHASIS' : getLowerBodyExercises(item).length === 1 ? 'LOWER-BODY MOVEMENT' : 'LOWER-BODY EMPHASIS'}
-                </span>
-                <strong>
-                  {getLowerBodyExercises(item).length ? getLowerBodyExercises(item).map((exercise) => exercise.name).join(' · ') : item.focus}
-                </strong>
-              </div>
-            </div>
-
-            <div className="rotation-duration">
-              <Icon name="clock" size={15} /> {item.duration}
-            </div>
-
-            {(item.id === 'pull' || item.id === 'core') && <RotationExerciseList workout={item} />}
+        {weeklyGymSchedule.map((entry, index) => {
+          const item = entry.workoutId ? workouts.find((candidate) => candidate.id === entry.workoutId) ?? null : null
+          const isToday = entry.dayOfWeek === today.getDay()
+          return <article className={`rotation-card panel ${item?.id === 'pull' || item?.id === 'core' ? 'field-rotation-card' : ''} ${isToday ? 'current' : ''}`} key={entry.day}>
+            <div className="rotation-card-top"><span className="rotation-card-number">{String(index + 1).padStart(2, '0')}</span><span className="micro-label">{entry.day.toUpperCase()}</span>{isToday && <span className="tiny-pill"><span className="status-dot" /> TODAY</span>}</div>
+            <h3>{item?.name ?? 'Rest'}</h3>
+            <p>{item?.focus ?? 'Recovery · no gym session scheduled'}</p>
+            {item ? <>
+              <div className="rotation-card-divider" />
+              <div className="rotation-duration"><Icon name="clock" size={15} /> {item.duration}</div>
+              <RotationExerciseList workout={item} />
+            </> : <div className="rotation-duration"><Icon name="moon" size={15} /> Rest day</div>}
           </article>
-        ))}
+        })}
       </div>
 
       <p className="rotation-note">
-        <Icon name="moon" size={16} /> Take a full rest day or an easy day
-        between sessions whenever you need it. Nothing is scheduled
-        automatically.
+        <Icon name="moon" size={16} /> A missed weekday session is skipped; later workouts stay on their scheduled day. Completed history is never generated or changed by the schedule.
       </p>
     </>
   )

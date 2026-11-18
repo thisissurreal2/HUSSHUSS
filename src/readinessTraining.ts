@@ -29,7 +29,7 @@ export function getTrainingRecommendation(checkIn?: ReadinessCheckIn): Readiness
       ? 'Your check-in is in the ready range. Follow the planned session and adjust if your body tells you otherwise.'
       : category === 'caution'
         ? 'Your score is in the caution range. A lighter session can preserve the main lifts while trimming optional work.'
-        : 'Your score is below 60. Consider rest or gentle movement; the workout rotation will wait for you.',
+        : 'Your score is below 60. Consider rest or gentle movement; today’s scheduled workout will not be moved.',
     factors: factorsText.length ? factorsText : ['No factor differs from the neutral midpoint.'],
   }
 }

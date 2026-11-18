@@ -313,7 +313,8 @@ export function WorkoutSession({
           const distanceUnit = /\bkm\b/i.test(exercise.targetReps) ? 'km' : 'metres'
           const distanceHeading = distanceUnit === 'km' ? 'KM' : 'M'
           const quantityLabel = metricType === 'timed' || metricType === 'per-side-time' ? 'seconds' : metricType === 'distance' ? `distance in ${distanceUnit}` : 'repetitions'
-          const quantityHeading = metricType === 'timed' ? 'SEC' : metricType === 'per-side-time' ? 'SEC / SIDE' : metricType === 'distance' ? distanceHeading : metricType === 'per-side' ? 'REPS / SIDE' : 'REPS'
+          const sideLabel = /per\s+arm/i.test(exercise.targetReps) ? 'ARM' : /per\s+leg/i.test(exercise.targetReps) ? 'LEG' : 'SIDE'
+          const quantityHeading = metricType === 'timed' ? 'SEC' : metricType === 'per-side-time' ? `SEC / ${sideLabel}` : metricType === 'distance' ? distanceHeading : metricType === 'per-side' ? `REPS / ${sideLabel}` : 'REPS'
           const sourceExerciseId = state.substitution?.originalExerciseId ?? exercise.id
           const previousPerformance = fieldWorkout
             ? getExercisePerformances(history, sourceExerciseId).filter((performance) => performance.sets.length > 0).at(-1)
@@ -347,7 +348,7 @@ export function WorkoutSession({
               </div>
               <p className="exercise-instructions">{exercise.instructions}</p>
               <div className="exercise-target">
-                Target · {exercise.targetSets} sets × {/\b(seconds?|secs?|sec|s|meters?|metres?|m|km|per side|per leg)\b/i.test(exercise.targetReps)
+                Target · {exercise.targetSets} sets × {/\b(seconds?|secs?|sec|s|meters?|metres?|m|km|per side|per leg|per arm)\b/i.test(exercise.targetReps)
                   ? exercise.targetReps
                   : `${exercise.targetReps} reps`}
               </div>

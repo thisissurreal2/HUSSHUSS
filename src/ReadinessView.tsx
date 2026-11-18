@@ -33,10 +33,10 @@ export function ReadinessPage({ history, workouts, recoverySessions, onSave }: {
   const score = isValidRatings(ratings) ? calculateReadinessScore(ratings) : 0
   const category = getReadinessCategory(score)
   const recommendation = category === 'ready'
-    ? 'Follow your normal workout rotation at planned intensity and keep normal rest periods.'
+    ? 'Follow today’s scheduled workout at planned intensity and keep normal rest periods.'
     : category === 'caution'
       ? 'Consider reducing working weight or total volume. Skip unnecessary failure sets and focus on technique.'
-      : 'Choose gentle mobility, light activity, or a recovery day. Your workout rotation will stay where it is.'
+      : 'Choose gentle mobility, light activity, or a recovery day. Later sessions remain on their scheduled weekdays.'
   const factors = getReadinessFactors(ratings)
 
   async function submit(event: FormEvent) {

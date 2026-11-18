@@ -56,8 +56,8 @@ test('muscle metadata matches Muscle Balance map and equipment filters remove un
 test('session substitution uses the alternative own history and preserves the programme and original history', () => {
   const originalHistory = record('old-bench', 'barbell-bench-press', 'Barbell Bench Press', '5–8', [[70, 8], [70, 8], [70, 7]])
   const substituteHistory = record('old-dumbbell', 'dumbbell-bench-press', 'Dumbbell Bench Press', '8–12', [[22.5, 10], [22.5, 9], [22.5, 8]])
-  const active = storage.createActiveWorkout('push', 2000, [originalHistory, substituteHistory])
-  const programme = workouts.getWorkout('push')
+  const active = storage.createActiveWorkout('arnold-chest-back', 2000, [originalHistory, substituteHistory])
+  const programme = workouts.getWorkout('arnold-chest-back')
   const next = substitutions.applySessionSubstitution(active, 0, 'dumbbell-bench-press', 'equipment-unavailable', [originalHistory, substituteHistory])
   assert.equal(next.template.exercises[0].id, 'dumbbell-bench-press')
   assert.equal(next.template.exercises[0].targetReps, '8–12')
@@ -65,7 +65,7 @@ test('session substitution uses the alternative own history and preserves the pr
   assert.equal(next.exercises[0].completed, false)
   assert.deepEqual([next.exercises[0].sets[0].weightKg, next.exercises[0].sets[0].reps], ['22.5', '10'])
   assert.equal(next.exercises[0].substitution.originalExerciseId, 'barbell-bench-press')
-  assert.equal(workouts.getWorkout('push').exercises[0].id, programme.exercises[0].id)
+  assert.equal(workouts.getWorkout('arnold-chest-back').exercises[0].id, programme.exercises[0].id)
   assert.equal(originalHistory.exercises[0].sets[0].weightKg, 70)
 })
 
@@ -78,7 +78,7 @@ test('substitute progression starts from its own history and unrelated original 
 })
 
 test('actual substitute ID drives Muscle Balance and XP once; record retains original prescription', () => {
-  const active = storage.createActiveWorkout('push', 2000, [])
+  const active = storage.createActiveWorkout('arnold-chest-back', 2000, [])
   let substituted = substitutions.applySessionSubstitution(active, 0, 'machine-chest-press', 'machine-occupied', [])
   substituted = {
     ...substituted,

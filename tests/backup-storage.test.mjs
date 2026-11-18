@@ -168,6 +168,15 @@ before(async () => {
       }
     }
     const record = workoutStorage.createWorkoutRecord(completed, 1_700_000_003_000)
+    const completedArnold = workoutStorage.createActiveWorkout('arnold-chest-back', 1_700_000_005_000, [record])
+    for (const exercise of completedArnold.exercises) {
+      exercise.completed = true
+      for (const set of exercise.sets) {
+        set.reps = '9'
+        set.completed = true
+      }
+    }
+    const arnoldRecord = workoutStorage.createWorkoutRecord(completedArnold, 1_700_000_008_000)
     const incomplete = workoutStorage.createActiveWorkout('core', 1_700_000_010_000, [record])
     incomplete.exercises[0] = {
       ...incomplete.exercises[0],
@@ -184,7 +193,7 @@ before(async () => {
       workouts: {
         ...workoutStorage.createInitialData(),
         rotationIndex: 2,
-        history: [record],
+        history: [arnoldRecord, record],
         currentWorkout: incomplete,
         extrasSessions: [completedExtra],
         extrasFavourites: ['wrist-curls'],
@@ -306,6 +315,8 @@ test('isolated restore creates a safety snapshot and failed restore preserves al
     await backup.restoreBackup(parsed)
     const restoredWorkouts = database.stores.get('records').get('workouts').snapshot
     assert.equal(restoredWorkouts.history.length, parsed.data.workouts.history.length)
+    assert.equal(restoredWorkouts.history[0].workoutName, 'Arnold — Chest & Back')
+    assert.equal(restoredWorkouts.history[0].workoutId, 'arnold-chest-back')
     assert.equal(restoredWorkouts.extrasSessions.length, parsed.data.workouts.extrasSessions.length)
     assert.equal(restoredWorkouts.currentWorkout.template.name, 'Core & Legs')
     assert.deepEqual(restoredWorkouts.currentWorkout.exercises, parsed.data.workouts.currentWorkout.exercises)

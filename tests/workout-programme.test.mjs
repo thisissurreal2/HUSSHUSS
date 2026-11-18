@@ -22,38 +22,52 @@ after(async () => { await vite?.close() })
 
 const rows = (workout) => workout.exercises.map(({ id, name, targetSets, targetReps }) => [id, name, targetSets, targetReps])
 
-test('rotation remains Push → Pull → Core & Legs and wraps to Push', () => {
-  assert.deepEqual(workouts.workouts.map(({ id, name }) => [id, name]), [
-    ['push', 'Push'], ['pull', 'Pull'], ['core', 'Core & Legs'],
+test('fixed weekly gym schedule maps weekdays and keeps both weekend days clear for rest', () => {
+  assert.deepEqual(workouts.weeklyGymSchedule.map(({ day, workoutId }) => [day, workoutId]), [
+    ['Monday', 'push'], ['Tuesday', 'pull'], ['Wednesday', 'core'],
+    ['Thursday', 'arnold-chest-back'], ['Friday', 'arnold-shoulders-arms'],
+    ['Saturday', null], ['Sunday', null],
   ])
-  assert.equal(workouts.workouts[storage.createInitialData().rotationIndex].name, 'Push')
-  assert.equal(workouts.workouts[(2 + 1) % workouts.workouts.length].name, 'Push')
+  for (const [date, expected] of [
+    [new Date(2026, 10, 16), 'Push'], [new Date(2026, 10, 17), 'Pull'],
+    [new Date(2026, 10, 18), 'Core & Legs'], [new Date(2026, 10, 19), 'Arnold — Chest & Back'],
+    [new Date(2026, 10, 20), 'Arnold — Shoulders & Arms'],
+    [new Date(2026, 10, 21), null], [new Date(2026, 10, 22), null],
+  ]) assert.equal(workouts.getScheduledWorkoutForDate(date)?.name ?? null, expected)
+  assert.equal(storage.createInitialData().rotationIndex, 0, 'the legacy cursor is preserved and no longer selects a weekday workout')
   assert.deepEqual(workouts.getLowerBodyExercises(workouts.getWorkout('push')), [])
   assert.deepEqual(workouts.getLowerBodyExercises(workouts.getWorkout('pull')), [])
 })
 
 test('Push has the exact chest, shoulder and triceps list with no leg press or barbell overhead press', () => {
   assert.deepEqual(rows(workouts.getWorkout('push')), [
-    ['barbell-bench-press', 'Bench Press', 3, '5–8'],
-    ['incline-dumbbell-press', 'Incline Dumbbell Press', 3, '8–12'],
+    ['incline-smith-machine-bench-press', 'Incline Smith Machine Bench Press', 3, '6–10'],
     ['pec-deck', 'Pec Deck', 3, '10–15'],
+    ['machine-chest-press', 'Machine Chest Press', 3, '8–12'],
     ['machine-shoulder-press', 'Machine Shoulder Press', 3, '8–12'],
-    ['dumbbell-lateral-raises', 'Lateral Raises', 3, '12–15'],
-    ['cable-tricep-pushdowns', 'Cable Tricep Pushdowns', 3, '10–15'],
-    ['overhead-cable-tricep-extensions', 'Overhead Cable Extensions', 2, '10–12'],
+    ['dumbbell-lateral-raises', 'Dumbbell Lateral Raises', 3, '12–20'],
+    ['single-arm-cable-tricep-pushdowns', 'Single-Arm Cable Tricep Pushdowns', 3, '10–15 per arm'],
+    ['overhead-cable-tricep-extensions', 'Overhead Cable Tricep Extensions', 2, '10–15'],
   ])
+  const pushdown = workouts.getWorkout('push').exercises[5]
+  assert.equal(analytics.getExerciseMetricType(pushdown.id, pushdown.name, pushdown.targetReps), 'per-side')
+  const pushdownPlan = analytics.getProgressionPlan([], { exerciseId: pushdown.id, name: pushdown.name, targetSets: pushdown.targetSets, targetReps: pushdown.targetReps })
+  assert.equal(pushdownPlan.unit, 'reps/arm')
+  assert.equal(pushdownPlan.targetMinimum, 10)
+  assert.equal(pushdownPlan.targetMaximum, 15)
 })
 
 test('Pull prioritizes weighted pull-ups and removes the Smith row without changing the remaining order', () => {
   const pull = workouts.getWorkout('pull')
   assert.deepEqual(rows(pull), [
     ['pull-ups', 'Weighted Pull-Ups', 3, '5–8'],
+    ['seated-cable-row', 'Seated Cable Row', 3, '8–12'],
     ['chest-supported-rows', 'Chest-Supported Row', 3, '8–12'],
+    ['incline-dumbbell-curls', 'Incline Dumbbell Curls', 3, '8–12'],
+    ['hammer-curls', 'Hammer Curls', 3, '10–15'],
     ['reverse-pec-deck', 'Reverse Pec Deck', 2, '12–15'],
-    ['preacher-curls', 'Preacher Curls', 3, '8–12'],
-    ['hammer-curls', 'Hammer Curls', 2, '10–12'],
   ])
-  assert.ok(!pull.exercises.some((item) => ['smith-machine-bent-over-row', 'single-arm-cable-rows', 'romanian-deadlift', 'incline-dumbbell-curls'].includes(item.id)))
+  assert.ok(!pull.exercises.some((item) => ['smith-machine-bent-over-row', 'single-arm-cable-rows', 'romanian-deadlift'].includes(item.id)))
 
   const active = storage.createActiveWorkout('pull', 2000)
   assert.equal(analytics.getExerciseMetricType('pull-ups', 'Weighted Pull-Ups', '5–8'), 'reps')
@@ -68,6 +82,31 @@ test('Pull prioritizes weighted pull-ups and removes the Smith row without chang
   assert.equal(record.exercises[0].sets[0].weightKg, 12.5)
   assert.equal(record.exercises[0].sets[0].reps, 6)
   assert.equal(analytics.getProgressionPlan([record], { exerciseId: 'pull-ups', name: 'Weighted Pull-Ups', targetSets: 3, targetReps: '5–8' }).metricType, 'reps')
+})
+
+test('Arnold workout templates retain their requested names, exercise order, shared identities and targets', () => {
+  const chestBack = workouts.getWorkout('arnold-chest-back')
+  const shouldersArms = workouts.getWorkout('arnold-shoulders-arms')
+  assert.equal(chestBack.name, 'Arnold — Chest & Back')
+  assert.deepEqual(rows(chestBack), [
+    ['barbell-bench-press', 'Barbell Bench Press', 3, '6–10'],
+    ['lat-pulldown', 'Lat Pulldown', 3, '8–12'],
+    ['incline-dumbbell-press', 'Incline Dumbbell Press', 2, '8–12'],
+    ['standing-t-bar-row', 'Standing T-Bar Row', 3, '8–12'],
+    ['pec-deck', 'Pec Deck', 2, '12–15'],
+  ])
+  assert.equal(shouldersArms.name, 'Arnold — Shoulders & Arms')
+  assert.deepEqual(rows(shouldersArms), [
+    ['dumbbell-lateral-raises', 'Dumbbell Lateral Raises', 3, '12–20'],
+    ['reverse-pec-deck', 'Reverse Pec Deck', 3, '12–15'],
+    ['preacher-curls', 'Preacher Curls', 3, '8–12'],
+    ['overhead-cable-tricep-extensions', 'Overhead Cable Tricep Extensions', 3, '10–15'],
+    ['cable-curls', 'Cable Bicep Curls', 2, '10–15'],
+    ['cable-tricep-pushdowns', 'Cable Tricep Pushdowns', 2, '10–15'],
+  ])
+  assert.equal(chestBack.exercises.filter((item) => item.id === 'pec-deck')[0].id, workouts.getWorkout('push').exercises[1].id)
+  assert.equal(chestBack.exercises.some((item) => /dumbbell bench|seated machine row|chest-supported row|cable chest fly/i.test(item.name)), false)
+  assert.equal(shouldersArms.exercises.some((item) => /shoulder press/i.test(item.name)), false)
 })
 
 test('Core & Legs has the exact order and targets grouped as core, legs, then athleticism', () => {
@@ -94,6 +133,8 @@ test('Core & Legs has the exact order and targets grouped as core, legs, then at
 
 test('Muscle Balance maps the new movements and preserves the established weighting method', () => {
   const expected = {
+    'incline-smith-machine-bench-press': { chest: 1, triceps: 0.5, shoulders: 0.5 },
+    'single-arm-cable-tricep-pushdowns': { triceps: 1 },
     'barbell-bench-press': { chest: 1, triceps: 0.5, shoulders: 0.5 },
     'incline-dumbbell-press': { chest: 1, shoulders: 0.5, triceps: 0.5 },
     'pec-deck': { chest: 1 },
@@ -101,6 +142,9 @@ test('Muscle Balance maps the new movements and preserves the established weight
     'pull-ups': { back: 1, biceps: 0.5 },
     'smith-machine-bent-over-row': { back: 1, biceps: 0.5, shoulders: 0.25 },
     'chest-supported-rows': { back: 1, biceps: 0.5, shoulders: 0.25 },
+    'seated-cable-row': { back: 1, biceps: 0.5 },
+    'standing-t-bar-row': { back: 1, biceps: 0.5, shoulders: 0.25 },
+    'incline-dumbbell-curls': { biceps: 1 },
     'reverse-pec-deck': { shoulders: 1, back: 0.25 },
     'preacher-curls': { biceps: 1 },
     'hammer-curls': { biceps: 1 },
@@ -162,5 +206,26 @@ test('saved active sessions and historical workout names, exercises and sets nor
   assert.equal(restored.history[0].workoutName, 'Core & Athleticism')
   assert.equal(restored.history[1].exercises[0].name, 'Smith Machine Bent-Over Row')
   assert.equal(restored.history[1].exercises[0].sets[0].weightKg, 50)
-  assert.equal(workouts.workouts[(restored.rotationIndex + 1) % workouts.workouts.length].name, 'Push')
+  assert.equal(restored.rotationIndex, 2, 'the old rolling cursor is retained rather than reset or advanced by the date-based schedule')
+})
+
+test('new date-selected workout sessions persist without changing the old cursor or archived workout history', () => {
+  const archivedRecord = {
+    id: 'existing-push-history', workoutId: 'push', workoutName: 'Push',
+    startedAt: 1_700_000_000_000, completedAt: 1_700_003_600_000, durationSeconds: 3600,
+    exercises: [{ exerciseId: 'old-bench', name: 'Bench Press', instructions: 'Archived snapshot.', targetSets: 3, targetReps: '5–8', completed: true,
+      sets: [{ id: 'old-bench-set', weightKg: 60, reps: 8, completed: true }] }],
+  }
+  const current = storage.createActiveWorkout('arnold-chest-back', 1_700_010_000_000, [archivedRecord])
+  const before = { ...storage.createInitialData(), rotationIndex: 2, currentWorkout: current, history: [archivedRecord] }
+  const restored = storage.normalizeAppData(before)
+  assert.ok(restored)
+  assert.equal(storage.isAppData(restored), true)
+  assert.equal(restored.rotationIndex, 2)
+  assert.deepEqual(restored.history, [archivedRecord])
+  assert.deepEqual(restored.currentWorkout, current)
+  const completed = storage.createWorkoutRecord(current, 1_700_013_600_000)
+  assert.equal(completed.workoutId, 'arnold-chest-back')
+  assert.equal(completed.workoutName, 'Arnold — Chest & Back')
+  assert.equal(completed.exercises[0].exerciseId, 'barbell-bench-press')
 })

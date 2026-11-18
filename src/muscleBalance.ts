@@ -386,14 +386,14 @@ function buildInsights(
     insights.push({
       id: 'gap-rotation',
       kind: 'gap',
-      text: `${joinLabels(uncovered)}: no completed sets counted in this period, and no exercise in your current rotation is mapped ${uncovered.length === 1 ? 'to it' : 'to them'}. That is a gap in the programme, not a measure of strength.`,
+      text: `${joinLabels(uncovered)}: no completed sets counted in this period, and no exercise in your current programme is mapped ${uncovered.length === 1 ? 'to it' : 'to them'}. That is a gap in the programme, not a measure of strength.`,
     })
   }
   if (covered.length > 0) {
     insights.push({
       id: 'gap-covered',
       kind: 'gap',
-      text: `${joinLabels(covered)}: no completed sets counted in this period, although your rotation includes ${covered.length === 1 ? 'an exercise' : 'exercises'} for ${covered.length === 1 ? 'it' : 'them'}.`,
+      text: `${joinLabels(covered)}: no completed sets counted in this period, although your programme includes ${covered.length === 1 ? 'an exercise' : 'exercises'} for ${covered.length === 1 ? 'it' : 'them'}.`,
     })
   }
 
